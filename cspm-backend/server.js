@@ -2,9 +2,13 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const { promises: fsp } = require('fs');
+const AWS = require('aws-sdk');
 
 const PORT = Number(process.env.PORT || 8000);
 const DATA_FILE = path.join(__dirname, 'data', 'findings.json');
+const cloudwatchlogs = new AWS.CloudWatchLogs({
+  region: process.env.AWS_REGION || 'us-east-1'
+});
 
 function loadFindingsSync() {
   return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
@@ -171,6 +175,76 @@ function jsonResponse(response, statusCode, payload) {
   response.end(JSON.stringify(payload));
 }
 
+function parseIntParam(value, fallback) {
+  if (!value) {
+    return fallback;
+  }
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : fallback;
+}
+
+async function detectSpamIps(logGroupName, threshold = 10, windowSeconds = 60, limit = 1000) {
+  const now = Date.now();
+  const startTime = now - windowSeconds * 1000;
+  const response = await cloudwatchlogs.filterLogEvents({
+    logGroupName,
+    startTime,
+    endTime: now,
+    filterPattern: 'IP=',
+    limit
+  }).promise();
+
+  const ipCount = {};
+  for (const event of response.events || []) {
+    const message = event.message || '';
+    if (message.includes('IP=')) {
+      try {
+        const ip = message.split('IP=')[1].split(/\s+/)[0];
+        ipCount[ip] = (ipCount[ip] || 0) + 1;
+      } catch (error) {
+        continue;
+      }
+    }
+  }
+
+  const spamIps = [];
+  for (const [ip, count] of Object.entries(ipCount)) {
+    if (count > threshold) {
+      spamIps.push({ ip, count });
+    }
+  }
+
+  return {
+    logGroupName,
+    threshold,
+    windowSeconds,
+    eventCount: response.events ? response.events.length : 0,
+    spamIps,
+    nextToken: response.nextToken
+  };
+}
+
+function parseRequestBodyJson(request) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    request.on('data', (chunk) => {
+      body += chunk.toString();
+    });
+    request.on('end', () => {
+      if (!body) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(body));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    request.on('error', reject);
+  });
+}
+
 async function remediateFinding(id) {
   const findings = await loadFindings();
   const index = findings.findIndex((finding) => finding.id === id);
@@ -239,6 +313,20 @@ async function requestHandler(request, response) {
 
     if (request.method === 'GET' && pathname === '/api/findings') {
       jsonResponse(response, 200, buildFindingsResponse(await loadFindings()));
+      return;
+    }
+
+    if (request.method === 'GET' && pathname === '/api/cloudwatch/spam-ips') {
+      if (!logGroupName) {
+        jsonResponse(response, 400, { message: 'Missing logGroupName query parameter' });
+        return;
+      }
+      const logGroupName = "/aws/lambda/lambda_handler";
+      const threshold = 10; 
+      const windowSeconds = 60; 
+      const limit = 1000; 
+
+      jsonResponse(response, 200, await detectSpamIps(logGroupName, threshold, windowSeconds, limit));
       return;
     }
 
