@@ -11,3 +11,7 @@
 
 # Loại bỏ các file log
 *.log
+
+.env
+.env.*
+node_modules/

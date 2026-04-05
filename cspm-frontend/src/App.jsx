@@ -5,7 +5,7 @@ import {
   useMemo,
   useState
 } from 'react';
-import { getDashboardSummary, getFindings, remediateFinding } from './lib/api';
+import { getDashboardSummary, getFindings, getSpamIps, remediateFinding } from './lib/api';
 
 const navItems = [
   { id: 'profile', label: 'Profile', icon: UserIcon },
@@ -44,6 +44,25 @@ function App() {
 
   const deferredSearch = useDeferredValue(search);
 
+  const [spamIps, setSpamIps] = useState([]);
+  const [spamLoading, setSpamLoading] = useState(true);
+
+useEffect(() => {
+    const controller = new AbortController();
+    async function loadSpamIps() {
+      setSpamLoading(true);
+      try {
+        const data = await getSpamIps(controller.signal);
+        setSpamIps(data.spamIps || []);
+      } catch (e) {
+        if (e.name !== 'AbortError') setSpamIps([]);
+      } finally {
+        setSpamLoading(false);
+      }
+    }
+    loadSpamIps();
+    return () => controller.abort();
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
 
@@ -296,6 +315,71 @@ function App() {
               </div>
             </div>
           </article>
+        </section>
+
+        <section className="panel findings-panel" style={{ marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+            <div>
+              <p className="eyebrow">CloudWatch · Lambda</p>
+              <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>Spam IP Detection</h2>
+            </div>
+            <span className="inline-pill" style={{
+              background: spamIps.length ? 'rgba(220,53,69,0.12)' : 'rgba(25,200,100,0.12)',
+              color: spamIps.length ? '#dc3545' : '#19c864',
+              padding: '4px 12px',
+              borderRadius: '999px',
+              fontSize: '0.75rem',
+              fontWeight: 600
+            }}>
+              {spamIps.length ? `${spamIps.length} threat${spamIps.length > 1 ? 's' : ''} detected` : 'Clean'}
+            </span>
+          </div>
+
+          {spamLoading && (
+            <div className="loading-state">
+              <ShieldIcon />
+              <p>Scanning CloudWatch logs...</p>
+            </div>
+          )}
+
+          {!spamLoading && spamIps.length === 0 && (
+            <div className="empty-state">
+              <ShieldIcon />
+              <p>No spam IPs detected in the last 24 hours.</p>
+            </div>
+          )}
+
+          {!spamLoading && spamIps.length > 0 && (
+            <div className="finding-list">
+              {spamIps
+                .sort((a, b) => b.count - a.count)
+                .map((item, index) => (
+                  <article
+                    key={item.ip}
+                    className="finding-row"
+                    style={{ animationDelay: `${index * 60}ms` }}
+                  >
+                    <div className="finding-copy">
+                      <h3 style={{ fontFamily: 'monospace', letterSpacing: '0.03em' }}>{item.ip}</h3>
+                      <p>{item.count} requests · Last 24h</p>
+                    </div>
+
+                    <span className="status-chip status-chip--fail">
+                      {item.count > 50 ? 'Critical' : item.count > 20 ? 'High' : 'Medium'}
+                    </span>
+
+                    <button
+                      type="button"
+                      className="action-button"
+                      onClick={() => navigator.clipboard?.writeText(item.ip)}
+                      title="Copy IP to clipboard"
+                    >
+                      Copy IP
+                    </button>
+                  </article>
+                ))}
+            </div>
+          )}
         </section>
 
         <section className="panel findings-panel">

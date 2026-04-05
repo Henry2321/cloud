@@ -1,5 +1,6 @@
 const http = require('http');
 const path = require('path');
+require('dotenv').config()
 const fs = require('fs');
 const { promises: fsp } = require('fs');
 const AWS = require('aws-sdk');
@@ -7,8 +8,12 @@ const AWS = require('aws-sdk');
 const PORT = Number(process.env.PORT || 8000);
 const DATA_FILE = path.join(__dirname, 'data', 'findings.json');
 const cloudwatchlogs = new AWS.CloudWatchLogs({
-  region: process.env.AWS_REGION || 'us-east-1'
+   region: 'ap-southeast-2',
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
 });
+
+console.log(process.env.AWS_SECRET_ACCESS_KEY)
 
 function loadFindingsSync() {
   return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
@@ -183,7 +188,7 @@ function parseIntParam(value, fallback) {
   return Number.isInteger(parsed) ? parsed : fallback;
 }
 
-async function detectSpamIps(logGroupName, threshold = 10, windowSeconds = 60, limit = 1000) {
+async function detectSpamIps(logGroupName, threshold = 10, windowSeconds = 86400, limit = 1000) {
   const now = Date.now();
   const startTime = now - windowSeconds * 1000;
   const response = await cloudwatchlogs.filterLogEvents({
@@ -221,6 +226,28 @@ async function detectSpamIps(logGroupName, threshold = 10, windowSeconds = 60, l
     eventCount: response.events ? response.events.length : 0,
     spamIps,
     nextToken: response.nextToken
+  };
+}
+
+function getCloudWatchErrorPayload(error) {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (message.includes('Missing credentials in config')) {
+    return {
+      statusCode: 503,
+      payload: {
+        message: 'CloudWatch credentials are not configured',
+        error: 'Set AWS credentials or enable AWS_SDK_LOAD_CONFIG=1 before calling this route'
+      }
+    };
+  }
+
+  return {
+    statusCode: 500,
+    payload: {
+      message: 'Unable to load CloudWatch spam IPs',
+      error: message
+    }
   };
 }
 
@@ -295,6 +322,17 @@ async function requestHandler(request, response) {
       });
       return;
     }
+    if (request.method === 'GET' && pathname === '/api/cloudwatch/list-log-groups') {
+      try {
+        const result = await cloudwatchlogs.describeLogGroups({ limit: 50 }).promise();
+        jsonResponse(response, 200, {
+          logGroups: result.logGroups.map(g => g.logGroupName)
+        });
+      } catch (error) {
+        jsonResponse(response, 500, { error: error.message });
+      }
+      return;
+    }
 
     if (request.method === 'GET' && pathname === '/api/dashboard-summary') {
       jsonResponse(response, 200, buildDashboardSummary(await loadFindings()));
@@ -317,16 +355,17 @@ async function requestHandler(request, response) {
     }
 
     if (request.method === 'GET' && pathname === '/api/cloudwatch/spam-ips') {
-      if (!logGroupName) {
-        jsonResponse(response, 400, { message: 'Missing logGroupName query parameter' });
-        return;
-      }
-      const logGroupName = "/aws/lambda/lambda_handler";
-      const threshold = 10; 
-      const windowSeconds = 60; 
-      const limit = 1000; 
+      const logGroupName = '/aws/lambda/lambda_handler';
+      const threshold = 10;
+      const windowSeconds = 86400;
+      const limit = 1000;
 
-      jsonResponse(response, 200, await detectSpamIps(logGroupName, threshold, windowSeconds, limit));
+      try {
+        jsonResponse(response, 200, await detectSpamIps(logGroupName, threshold, windowSeconds, limit));
+      } catch (error) {
+        const { statusCode, payload } = getCloudWatchErrorPayload(error);
+        jsonResponse(response, statusCode, payload);
+      }
       return;
     }
 

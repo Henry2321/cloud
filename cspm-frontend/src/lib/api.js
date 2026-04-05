@@ -10,10 +10,15 @@ async function readJson(response) {
 
 // KHAI BÁO ĐƯỜNG LINK API GATEWAY THẬT TỪ AWS
 // (Lưu ý: Không có chữ /api/findings ở cuối nhé, chỉ lấy phần domain gốc thôi)
-const API_BASE_URL = 'https://eaxv1dtdd3.execute-api.us-east-1.amazonaws.com';
+const API_BASE_URL = 'http://localhost:8000';
 
 export async function getDashboardSummary(signal) {
   const response = await fetch(`${API_BASE_URL}/api/dashboard-summary`, { signal });
+  return readJson(response);
+}
+export async function getSpamIps(signal) {
+  const response = await fetch('/api/cloudwatch/spam-ips', { signal });
+  if (!response.ok) throw new Error('Unable to load spam IPs');
   return readJson(response);
 }
 
