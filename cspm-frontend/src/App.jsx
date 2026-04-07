@@ -5,7 +5,7 @@ import {
   useMemo,
   useState
 } from 'react';
-import { getDashboardSummary, getFindings, getSpamIps, remediateFinding } from './lib/api';
+import { getDashboardSummary, getFindings, getSpamIps, remediateFinding, triggerScan } from './lib/api';
 
 const navItems = [
   { id: 'profile', label: 'Profile', icon: UserIcon },
@@ -41,6 +41,29 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionFindingId, setActionFindingId] = useState('');
+  const [scanning, setScanning] = useState(false);
+  const [scanMsg, setScanMsg] = useState('');
+
+  async function handleScan() {
+    setScanning(true);
+    setScanMsg('');
+    try {
+      await triggerScan();
+      const [summaryPayload, findingsPayload] = await Promise.all([
+        getDashboardSummary(),
+        getFindings()
+      ]);
+      startTransition(() => {
+        setSummary(summaryPayload.summary);
+        setFindings(findingsPayload.findings);
+      });
+      setScanMsg('Scan completed!');
+    } catch (e) {
+      setScanMsg('Scan failed: ' + (e.message || 'Unknown error'));
+    } finally {
+      setScanning(false);
+    }
+  }
 
   const deferredSearch = useDeferredValue(search);
 
@@ -210,6 +233,19 @@ useEffect(() => {
             </div>
 
             <div className="topbar-actions">
+              {scanMsg && (
+                <span style={{ fontSize: '0.75rem', color: scanMsg.startsWith('Scan failed') ? 'var(--coral)' : 'var(--mint)' }}>
+                  {scanMsg}
+                </span>
+              )}
+              <button
+                className="primary-button"
+                type="button"
+                onClick={handleScan}
+                disabled={scanning}
+              >
+                {scanning ? 'Scanning...' : '🔍 Scan Now'}
+              </button>
               <button className="ghost-button" type="button">
                 Local API
               </button>

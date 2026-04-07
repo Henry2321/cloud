@@ -4,58 +4,47 @@ from core.aws_connection import get_boto3_client
 from core.database_adapter import save_finding
 from notifications.alert_manager import send_security_alert
 
-def scan_s3_public_access():
-    logger.info("Bắt đầu quét S3 Buckets...")
+def scan_ec2_security_groups():
+    logger.info("Bắt đầu quét EC2 Security Groups...")
     try:
-        s3_client = get_boto3_client('s3')
-        response = s3_client.list_buckets()
-        buckets = response.get('Buckets', [])
-        
-        for bucket in buckets:
-            bucket_name = bucket['Name']
-            bucket_arn = f"arn:aws:s3:::{bucket_name}"
-            
-            is_pass = False
-            details = "Bucket chưa được khóa Public Access. Nguy cơ rò rỉ dữ liệu cực cao!"
-            severity = 'CRITICAL'
-            
-            try:
-                # Lấy cấu hình chặn Public
-                config = s3_client.get_public_access_block(Bucket=bucket_name)
-                blocks = config.get('PublicAccessBlockConfiguration', {})
-                
-                # Cần cả 4 cờ này là True thì mới an toàn 100%
-                if all([
-                    blocks.get('BlockPublicAcls'),
-                    blocks.get('IgnorePublicAcls'),
-                    blocks.get('BlockPublicPolicy'),
-                    blocks.get('RestrictPublicBuckets')
-                ]):
-                    is_pass = True
-                    details = "Bucket đã được cấu hình khóa an toàn."
-                    severity = 'LOW'
-                    
-            except Exception as e:
-                if 'NoSuchPublicAccessBlockConfiguration' in str(e):
-                    # Không có cấu hình = Đang mở public
-                    pass 
-                else:
-                    logger.error(f"Lỗi không xác định khi quét S3 {bucket_name}: {e}")
-            
-            # 1. Lưu kết quả vào DynamoDB
+        ec2_client = get_boto3_client('ec2')
+        response = ec2_client.describe_security_groups()
+        security_groups = response.get('SecurityGroups', [])
+
+        for sg in security_groups:
+            sg_id = sg['GroupId']
+            sg_name = sg.get('GroupName', sg_id)
+            sg_arn = f"arn:aws:ec2:::security-group/{sg_id}"
+
+            is_pass = True
+            details = f"Security Group {sg_name} được cấu hình an toàn."
+            severity = 'LOW'
+
+            for rule in sg.get('IpPermissions', []):
+                from_port = rule.get('FromPort', 0)
+                to_port = rule.get('ToPort', 65535)
+                for ip_range in rule.get('IpRanges', []):
+                    if ip_range.get('CidrIp') == '0.0.0.0/0':
+                        if from_port <= 22 <= to_port or from_port <= 3389 <= to_port:
+                            is_pass = False
+                            details = f"Security Group {sg_name} đang mở port SSH/RDP ra Internet (0.0.0.0/0)!"
+                            severity = 'CRITICAL'
+                            break
+                if not is_pass:
+                    break
+
             finding = save_finding(
-                service='S3',
-                resource_name=bucket_name,
-                resource_id=bucket_arn,
-                rule_name='S3_Block_Public_Access',
+                service='EC2',
+                resource_name=sg_name,
+                resource_id=sg_arn,
+                rule_name='EC2_SG_SSH_RDP_OPEN',
                 is_pass=is_pass,
                 severity=severity,
                 details=details
             )
-            
-            # 2. Nếu rớt (FAIL), lập tức hú còi báo động qua Email
+
             if not is_pass:
                 send_security_alert(finding)
-                
+
     except Exception as e:
-        logger.error(f"Lỗi hệ thống khi chạy S3 Scanner: {e}")
+        logger.error(f"Lỗi hệ thống khi chạy EC2 Scanner: {e}")

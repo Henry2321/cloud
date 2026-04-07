@@ -369,6 +369,22 @@ async function requestHandler(request, response) {
       return;
     }
 
+    if (request.method === 'POST' && pathname === '/api/scan') {
+      const { exec } = require('child_process');
+      exec(
+        'python -m scanners.orchestrator',
+        { cwd: path.join(__dirname) },
+        (error, stdout, stderr) => {
+          if (error) {
+            jsonResponse(response, 500, { message: 'Scan failed', error: error.message, stderr });
+          } else {
+            jsonResponse(response, 200, { message: 'Scan completed', output: stdout });
+          }
+        }
+      );
+      return;
+    }
+
     if (request.method === 'POST' && /^\/api\/findings\/[^/]+\/remediate$/.test(pathname)) {
       const id = pathname.split('/')[3];
       const finding = await remediateFinding(id);

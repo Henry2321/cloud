@@ -2,8 +2,12 @@
 import json
 from core.config import SNS_TOPIC_ARN, logger
 from core.aws_connection import get_boto3_client
+import os
 
 def send_security_alert(finding):
+    if os.environ.get('SNS_ENABLED', 'true').lower() != 'true':
+        logger.info("SNS đang tắt (SNS_ENABLED=false). Bỏ qua gửi email.")
+        return False
     """
     Hàm định dạng và gửi cảnh báo qua Amazon SNS khi phát hiện lỗ hổng.
     Chỉ gửi cảnh báo với các lỗi có mức độ HIGH hoặc CRITICAL.

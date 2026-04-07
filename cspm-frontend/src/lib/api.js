@@ -10,7 +10,7 @@ async function readJson(response) {
 
 // KHAI BÁO ĐƯỜNG LINK API GATEWAY THẬT TỪ AWS
 // (Lưu ý: Không có chữ /api/findings ở cuối nhé, chỉ lấy phần domain gốc thôi)
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = 'https://qf2xb7lha4.execute-api.us-east-1.amazonaws.com';
 
 export async function getDashboardSummary(signal) {
   const response = await fetch(`${API_BASE_URL}/api/dashboard-summary`, { signal });
@@ -24,6 +24,11 @@ export async function getSpamIps(signal) {
 
 export async function getFindings(signal) {
   const response = await fetch(`${API_BASE_URL}/api/findings`, { signal });
+  return readJson(response);
+}
+
+export async function triggerScan(signal) {
+  const response = await fetch(`${API_BASE_URL}/api/scan`, { method: 'POST', signal });
   return readJson(response);
 }
 
