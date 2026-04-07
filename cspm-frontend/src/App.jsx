@@ -41,6 +41,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionFindingId, setActionFindingId] = useState('');
+  const [remediateMsg, setRemediateMsg] = useState({});  // { [findingId]: { ok, text } }
   const [scanning, setScanning] = useState(false);
   const [scanMsg, setScanMsg] = useState('');
 
@@ -179,21 +180,22 @@ useEffect(() => {
 
   async function handleRemediate(findingId) {
     setActionFindingId(findingId);
-    setError('');
+    setRemediateMsg((prev) => ({ ...prev, [findingId]: null }));
 
     try {
-      await remediateFinding(findingId);
+      const result = await remediateFinding(findingId);
+      setRemediateMsg((prev) => ({ ...prev, [findingId]: { ok: true, text: result.message || 'Khắc phục thành công!' } }));
       const [summaryPayload, findingsPayload] = await Promise.all([
         getDashboardSummary(),
         getFindings()
       ]);
-
       startTransition(() => {
         setSummary(summaryPayload.summary);
         setFindings(findingsPayload.findings);
       });
     } catch (actionError) {
-      setError(actionError.message || 'Unable to remediate the selected finding.');
+      const msg = actionError.message || 'Không thể tự động khắc phục.';
+      setRemediateMsg((prev) => ({ ...prev, [findingId]: { ok: false, text: msg } }));
     } finally {
       setActionFindingId('');
     }
@@ -479,6 +481,11 @@ useEffect(() => {
                   <div className="finding-copy">
                     <h3>{item.title}</h3>
                     <p>{item.time}</p>
+                    {remediateMsg[item.id] && (
+                      <p style={{ fontSize: '0.75rem', marginTop: '4px', color: remediateMsg[item.id].ok ? 'var(--mint)' : 'var(--coral)' }}>
+                        {remediateMsg[item.id].text}
+                      </p>
+                    )}
                   </div>
 
                   <span className={`status-chip status-chip--${item.severity.toLowerCase()}`}>
@@ -487,11 +494,11 @@ useEffect(() => {
 
                   <button
                     type="button"
-                    disabled={item.severity === 'Pass' || actionFindingId === item.id}
-                    className={`action-button${item.severity === 'Pass' ? ' is-muted' : ''}`}
+                    disabled={item.status === 'PASS' || actionFindingId === item.id}
+                    className={`action-button${item.status === 'PASS' ? ' is-muted' : ''}`}
                     onClick={() => handleRemediate(item.id)}
                   >
-                    {actionFindingId === item.id ? 'Applying...' : item.action}
+                    {actionFindingId === item.id ? 'Applying...' : item.status === 'PASS' ? 'Fixed' : 'Remediate'}
                   </button>
                 </article>
               ))}
