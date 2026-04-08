@@ -145,7 +145,7 @@ resource "aws_lambda_function" "cspm_spam_ip_handler" {
 resource "aws_cloudwatch_event_rule" "every_hour" {
   name                = "cspm-hourly-scan"
   description         = "Kich hoat CSPM Scanner moi gio"
-  schedule_expression = "rate(1 hour)"
+  schedule_expression = "rate(72 hours)"
 }
 resource "aws_cloudwatch_event_target" "trigger_scanner" {
   rule      = aws_cloudwatch_event_rule.every_hour.name
