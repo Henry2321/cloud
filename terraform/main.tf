@@ -50,6 +50,22 @@ resource "aws_lambda_function" "cspm_spam_ip_handler" {
   handler       = "api.get_spam_ips.lambda_handler"
   runtime       = "python3.10"
   timeout       = 30
+
+  environment {
+    variables = {
+      SPAM_HISTORY_TABLE = aws_dynamodb_table.spam_ip_history.name
+    }
+  }
+}
+resource "aws_dynamodb_table" "spam_ip_history" {
+  name         = "cspm-spam-ip-history"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "id"
+
+  attribute {
+    name = "id"
+    type = "S"
+  }
 }
 resource "aws_iam_role_policy_attachment" "lambda_cloudwatch_read" {
   role       = aws_iam_role.lambda_exec_role.name
