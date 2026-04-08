@@ -13,7 +13,8 @@ except Exception as e:
 def lambda_handler(event, context):
     # Lấy finding id từ URL /api/findings/{id}/remediate
     path_params = event.get('pathParameters') or {}
-    finding_id = path_params.get('id') or event.get('rawPath', '').split('/')[3]
+    path_parts = event.get('rawPath', '').split('/')
+    finding_id = path_params.get('id') or (path_parts[3] if len(path_parts) > 3 else None)
 
     if not finding_id:
         return _response(400, {"message": "Thiếu finding id"})
