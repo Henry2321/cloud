@@ -3,7 +3,11 @@ provider "aws" {
   region = "us-east-1"
 }
 
-# 2. TẠO KÉT SẮT DYNAMODB (Nơi chứa danh sách lỗi)
+# =========================================================================
+# PHẦN 1: DATABASE & QUYỀN HẠN (IAM)
+# =========================================================================
+
+# 2. TẠO KÉT SẮT DYNAMODB
 resource "aws_dynamodb_table" "cspm_findings" {
   name           = "cspm-findings-table"
   billing_mode   = "PAY_PER_REQUEST"
@@ -19,10 +23,9 @@ resource "aws_dynamodb_table" "cspm_findings" {
   }
 }
 
-# 3. TẠO THẺ NHÂN VIÊN (IAM ROLE & POLICY CHO LAMBDA)
-# Cho phép Lambda được phép chạy
+# 3. TẠO THẺ NHÂN VIÊN (ĐÃ FIX TÊN THÀNH V2 ĐỂ ÉP AWS CHẠY, KHÔNG BỊ LỖI ASSUME ROLE)
 resource "aws_iam_role" "lambda_exec_role" {
-  name = "cspm_lambda_execution_role"
+  name = "cspm_lambda_execution_role_v2"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -33,7 +36,7 @@ resource "aws_iam_role" "lambda_exec_role" {
   })
 }
 
-# Cấp quyền: Ghi log, Đọc/Ghi DynamoDB và Quét cấu hình AWS (SecurityAudit)
+# Các quyền cơ bản
 resource "aws_iam_role_policy_attachment" "lambda_logs" {
   role       = aws_iam_role.lambda_exec_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
@@ -44,26 +47,28 @@ resource "aws_iam_role_policy_attachment" "lambda_dynamodb" {
 }
 resource "aws_iam_role_policy_attachment" "lambda_security_audit" {
   role       = aws_iam_role.lambda_exec_role.name
-  policy_arn = "arn:aws:iam::aws:policy/SecurityAudit" # Quyền này cho phép Boto3 quét S3, EC2, IAM...
+  policy_arn = "arn:aws:iam::aws:policy/SecurityAudit"
+}
+# Quyền của Phúc: Đọc CloudWatch Logs cho tính năng Spam IP
+resource "aws_iam_role_policy_attachment" "lambda_cloudwatch_read" {
+  role       = aws_iam_role.lambda_exec_role.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchLogsReadOnlyAccess"
 }
 
-# 4. TẠO ANH BẢO VỆ LAMBDA VÀ ĐƯA CODE (.ZIP) LÊN MÂY
+# =========================================================================
+# PHẦN 2: CÁC HÀM LAMBDA (ĐỘI QUÂN NHÂN VIÊN)
+# =========================================================================
+
+# Lambda 1: Con Bot đi quét
 resource "aws_lambda_function" "cspm_scanner" {
-  function_name = "cspm-scanner-bot"
-  role          = aws_iam_role.lambda_exec_role.arn
-  
-  # Đường dẫn trỏ tới file zip bạn vừa tạo ở thư mục bên cạnh
-  filename      = "../cspm-backend/cspm_backend_payload.zip"
-
-  # BỔ SUNG DÒNG NÀY VÀO ĐỂ TERRAFORM BIẾT CODE ĐÃ THAY ĐỔI
+  function_name    = "cspm-scanner-bot"
+  role             = aws_iam_role.lambda_exec_role.arn
+  filename         = "../cspm-backend/cspm_backend_payload.zip"
   source_code_hash = filebase64sha256("../cspm-backend/cspm_backend_payload.zip")
-  
-  # Chỉ định hàm Đội trưởng (orchestrator.py -> hàm lambda_handler)
-  handler       = "scanners.orchestrator.lambda_handler"
-  runtime       = "python3.10"
-  timeout       = 300 # Cho phép chạy tối đa 5 phút vì đi quét nhiều dịch vụ sẽ tốn thời gian
+  handler          = "scanners.orchestrator.lambda_handler"
+  runtime          = "python3.10"
+  timeout          = 300
 
-  # Truyền tên bảng DynamoDB và đường dẫn SNS vào cho Python đọc
   environment {
     variables = {
       DYNAMODB_TABLE = aws_dynamodb_table.cspm_findings.name
@@ -73,28 +78,7 @@ resource "aws_lambda_function" "cspm_scanner" {
   }
 }
 
-# 5. LẮP ĐỒNG HỒ BÁO THỨC (EVENTBRIDGE) - Cứ 1 tiếng chạy 1 lần
-resource "aws_cloudwatch_event_rule" "every_hour" {
-  name                = "cspm-hourly-scan"
-  description         = "Kich hoat CSPM Scanner moi gio"
-  schedule_expression = "rate(48 hours)"
-}
-
-resource "aws_cloudwatch_event_target" "trigger_scanner" {
-  rule      = aws_cloudwatch_event_rule.every_hour.name
-  target_id = "lambda"
-  arn       = aws_lambda_function.cspm_scanner.arn
-}
-
-resource "aws_lambda_permission" "allow_eventbridge" {
-  statement_id  = "AllowExecutionFromCloudWatch"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.cspm_scanner.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.every_hour.arn
-}
-
-# 5b. LAMBDA TRIGGER SCAN (được gọi từ nút Scan Now trên Frontend)
+# Lambda 2: Kích hoạt quét từ nút Scan Now
 resource "aws_lambda_function" "cspm_scan_trigger" {
   function_name    = "cspm-scan-trigger"
   role             = aws_iam_role.lambda_exec_role.arn
@@ -112,36 +96,15 @@ resource "aws_lambda_function" "cspm_scan_trigger" {
   }
 }
 
-# =========================================================================
-# PHẦN 2: XÂY DỰNG API GATEWAY (CẦU NỐI CHO FRONTEND)
-# =========================================================================
-
-# 1. Tạo cái "Cửa chính" (API Gateway - HTTP API)
-resource "aws_apigatewayv2_api" "cspm_api" {
-  name          = "cspm-http-api"
-  protocol_type = "HTTP"
-  
-  # Quan trọng: Cho phép Frontend (CORS) được phép gọi API này
-  cors_configuration {
-    allow_origins = ["*"] # Mở cho tất cả web gọi vào (Khi làm thật thì nên điền link web của bạn vào đây)
-    allow_methods = ["GET", "POST", "OPTIONS"]
-    allow_headers = ["content-type"]
-  }
-}
-
-# 2. Tạo một anh "Lễ tân" (Lambda thứ 2) chuyên đi lấy dữ liệu từ DB trả cho Web
+# Lambda 3: Lễ tân lấy dữ liệu (Dashboard & Findings)
 resource "aws_lambda_function" "cspm_api_handler" {
-  function_name = "cspm-api-handler"
-  role          = aws_iam_role.lambda_exec_role.arn # Dùng chung thẻ nhân viên với anh bảo vệ ở trên
-  filename      = "../cspm-backend/cspm_backend_payload.zip" # Vẫn dùng chung cục code đó
-
-  # BỔ SUNG DÒNG NÀY VÀO LUÔN
+  function_name    = "cspm-api-handler"
+  role             = aws_iam_role.lambda_exec_role.arn
+  filename         = "../cspm-backend/cspm_backend_payload.zip"
   source_code_hash = filebase64sha256("../cspm-backend/cspm_backend_payload.zip")
-  
-  # CHÚ Ý: Chỗ này trỏ tới cái hàm GET dữ liệu của bạn trong thư mục api/
-  handler       = "api.get_inventory.lambda_handler"
-  runtime       = "python3.10"
-  timeout       = 30
+  handler          = "api.get_inventory.lambda_handler"
+  runtime          = "python3.10"
+  timeout          = 30
 
   environment {
     variables = {
@@ -150,21 +113,7 @@ resource "aws_lambda_function" "cspm_api_handler" {
   }
 }
 
-# 3. Mở một cái "Quầy số 1" (Route) trên Cửa chính
-resource "aws_apigatewayv2_route" "get_findings_route" {
-  api_id    = aws_apigatewayv2_api.cspm_api.id
-  route_key = "GET /api/findings" # Đường dẫn URL
-  target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
-}
-
-# 2. MỞ THÊM CỬA CHO SUMMARY (MỚI)
-resource "aws_apigatewayv2_route" "get_summary_route" {
-  api_id    = aws_apigatewayv2_api.cspm_api.id
-  route_key = "GET /api/dashboard-summary"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
-}
-
-# 2b. LAMBDA REMEDIATE (xử lý nút Remediate trên Frontend)
+# Lambda 4: Sửa lỗi tự động Remediate
 resource "aws_lambda_function" "cspm_remediator" {
   function_name    = "cspm-remediator"
   role             = aws_iam_role.lambda_exec_role.arn
@@ -181,67 +130,77 @@ resource "aws_lambda_function" "cspm_remediator" {
   }
 }
 
-# 2c. MỞ THÊM CỬA CHO TÍNH NĂNG SPAM IPS (Dành cho AI Analyst)
-resource "aws_apigatewayv2_route" "get_spam_ips_route" {
+# Lambda 5: Đọc Spam IPs (Của Phúc)
+resource "aws_lambda_function" "cspm_spam_ip_handler" {
+  function_name    = "cspm-spam-ip-handler"
+  role             = aws_iam_role.lambda_exec_role.arn
+  filename         = "../cspm-backend/cspm_backend_payload.zip"
+  source_code_hash = filebase64sha256("../cspm-backend/cspm_backend_payload.zip")
+  handler          = "api.get_spam_ips.lambda_handler"
+  runtime          = "python3.10"
+  timeout          = 30
+}
+
+# Đồng hồ báo thức (EventBridge)
+resource "aws_cloudwatch_event_rule" "every_hour" {
+  name                = "cspm-hourly-scan"
+  description         = "Kich hoat CSPM Scanner moi gio"
+  schedule_expression = "rate(1 hour)"
+}
+resource "aws_cloudwatch_event_target" "trigger_scanner" {
+  rule      = aws_cloudwatch_event_rule.every_hour.name
+  target_id = "lambda"
+  arn       = aws_lambda_function.cspm_scanner.arn
+}
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowExecutionFromCloudWatch"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.cspm_scanner.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.every_hour.arn
+}
+
+# =========================================================================
+# PHẦN 3: XÂY DỰNG API GATEWAY (CỬA CHÍNH)
+# =========================================================================
+
+resource "aws_apigatewayv2_api" "cspm_api" {
+  name          = "cspm-http-api"
+  protocol_type = "HTTP"
+  cors_configuration {
+    allow_origins = ["*"]
+    allow_methods = ["GET", "POST", "OPTIONS"]
+    allow_headers = ["content-type"]
+  }
+}
+
+resource "aws_apigatewayv2_stage" "default" {
+  api_id      = aws_apigatewayv2_api.cspm_api.id
+  name        = "$default"
+  auto_deploy = true
+}
+
+# 1. Route: Get Findings
+resource "aws_apigatewayv2_route" "get_findings_route" {
   api_id    = aws_apigatewayv2_api.cspm_api.id
-  route_key = "GET /api/cloudwatch/spam-ips"
+  route_key = "GET /api/findings"
   target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
 }
 
-# 3. MỞ THÊM CỬA CHO NÚT SỬA LỖI (MỚI)
-resource "aws_apigatewayv2_route" "remediate_route" {
+# 2. Route: Dashboard Summary
+resource "aws_apigatewayv2_route" "get_summary_route" {
   api_id    = aws_apigatewayv2_api.cspm_api.id
-  route_key = "POST /api/findings/{id}/remediate"
-  target    = "integrations/${aws_apigatewayv2_integration.remediate_integration.id}"
+  route_key = "GET /api/dashboard-summary"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
 }
 
-resource "aws_apigatewayv2_integration" "remediate_integration" {
-  api_id                 = aws_apigatewayv2_api.cspm_api.id
-  integration_type       = "AWS_PROXY"
-  integration_uri        = aws_lambda_function.cspm_remediator.invoke_arn
-  payload_format_version = "2.0"
-}
-
-resource "aws_lambda_permission" "api_gw_remediate" {
-  statement_id  = "AllowExecutionFromAPIGatewayRemediate"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.cspm_remediator.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.cspm_api.execution_arn}/*/*"
-}
-
-# 4. ROUTE CHO NÚT SCAN NOW
-resource "aws_apigatewayv2_route" "scan_route" {
-  api_id    = aws_apigatewayv2_api.cspm_api.id
-  route_key = "POST /api/scan"
-  target    = "integrations/${aws_apigatewayv2_integration.scan_integration.id}"
-}
-
-resource "aws_apigatewayv2_integration" "scan_integration" {
-  api_id                 = aws_apigatewayv2_api.cspm_api.id
-  integration_type       = "AWS_PROXY"
-  integration_uri        = aws_lambda_function.cspm_scan_trigger.invoke_arn
-  payload_format_version = "2.0"
-}
-
-resource "aws_lambda_permission" "api_gw_scan" {
-  statement_id  = "AllowExecutionFromAPIGatewayScan"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.cspm_scan_trigger.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.cspm_api.execution_arn}/*/*"
-}
-
-# 4. Nối "Quầy số 1" với anh "Lễ tân" Lambda
+# Integration dùng chung
 resource "aws_apigatewayv2_integration" "lambda_integration" {
-  api_id           = aws_apigatewayv2_api.cspm_api.id
-  integration_type = "AWS_PROXY"
-
+  api_id                 = aws_apigatewayv2_api.cspm_api.id
+  integration_type       = "AWS_PROXY"
   integration_uri        = aws_lambda_function.cspm_api_handler.invoke_arn
   payload_format_version = "2.0"
 }
-
-# 5. Cấp quyền cho Cửa chính được phép gọi anh Lễ tân
 resource "aws_lambda_permission" "api_gw" {
   statement_id  = "AllowExecutionFromAPIGateway"
   action        = "lambda:InvokeFunction"
@@ -250,31 +209,72 @@ resource "aws_lambda_permission" "api_gw" {
   source_arn    = "${aws_apigatewayv2_api.cspm_api.execution_arn}/*/*"
 }
 
-# 6. Mở cửa đón khách (Deploy API)
-resource "aws_apigatewayv2_stage" "default" {
-  api_id      = aws_apigatewayv2_api.cspm_api.id
-  name        = "$default"
-  auto_deploy = true
+# 3. Route: Scan Now
+resource "aws_apigatewayv2_route" "scan_route" {
+  api_id    = aws_apigatewayv2_api.cspm_api.id
+  route_key = "POST /api/scan"
+  target    = "integrations/${aws_apigatewayv2_integration.scan_integration.id}"
+}
+resource "aws_apigatewayv2_integration" "scan_integration" {
+  api_id                 = aws_apigatewayv2_api.cspm_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.cspm_scan_trigger.invoke_arn
+  payload_format_version = "2.0"
+}
+resource "aws_lambda_permission" "api_gw_scan" {
+  statement_id  = "AllowExecutionFromAPIGatewayScan"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.cspm_scan_trigger.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.cspm_api.execution_arn}/*/*"
 }
 
-# 7. IN RA MÀN HÌNH ĐƯỜNG LINK API ĐỂ LÁT NỮA GẮN VÀO FRONTEND REACT
-# In ra các đường link để gắn vào code React
-output "api_urls" {
-  value = {
-    get_findings      = "${aws_apigatewayv2_api.cspm_api.api_endpoint}/api/findings"
-    dashboard_summary = "${aws_apigatewayv2_api.cspm_api.api_endpoint}/api/dashboard-summary"
-    remediate         = "${aws_apigatewayv2_api.cspm_api.api_endpoint}/api/findings/{id}/remediate"
-  }
+# 4. Route: Remediate
+resource "aws_apigatewayv2_route" "remediate_route" {
+  api_id    = aws_apigatewayv2_api.cspm_api.id
+  route_key = "POST /api/findings/{id}/remediate"
+  target    = "integrations/${aws_apigatewayv2_integration.remediate_integration.id}"
+}
+resource "aws_apigatewayv2_integration" "remediate_integration" {
+  api_id                 = aws_apigatewayv2_api.cspm_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.cspm_remediator.invoke_arn
+  payload_format_version = "2.0"
+}
+resource "aws_lambda_permission" "api_gw_remediate" {
+  statement_id  = "AllowExecutionFromAPIGatewayRemediate"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.cspm_remediator.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.cspm_api.execution_arn}/*/*"
+}
+
+# 5. Route: Spam IPs
+resource "aws_apigatewayv2_route" "get_spam_ips_route" {
+  api_id    = aws_apigatewayv2_api.cspm_api.id
+  route_key = "GET /api/cloudwatch/spam-ips"
+  target    = "integrations/${aws_apigatewayv2_integration.spam_ip_integration.id}"
+}
+resource "aws_apigatewayv2_integration" "spam_ip_integration" {
+  api_id                 = aws_apigatewayv2_api.cspm_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.cspm_spam_ip_handler.invoke_arn
+  payload_format_version = "2.0"
+}
+resource "aws_lambda_permission" "api_gw_spam_ip" {
+  statement_id  = "AllowExecutionFromAPIGatewaySpamIp"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.cspm_spam_ip_handler.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.cspm_api.execution_arn}/*/*"
 }
 
 # =========================================================================
-# PHẦN 3: XÂY DỰNG HỆ THỐNG CẢNH BÁO (AMAZON SNS)
+# PHẦN 4: HỆ THỐNG CẢNH BÁO (AMAZON SNS & KMS)
 # =========================================================================
 
-# Nhớ giữ nguyên dòng này ở trên cùng phần KMS nhé
 data "aws_caller_identity" "current" {}
 
-# 0. Tạo KMS Key và dán "Nội quy mở khóa" (Policy) CHUẨN 100%
 resource "aws_kms_key" "sns_cmk" {
   description             = "CMK for CSPM SNS Topic encryption"
   deletion_window_in_days = 7
@@ -285,7 +285,6 @@ resource "aws_kms_key" "sns_cmk" {
     Id      = "cspm-kms-policy"
     Statement = [
       {
-        # 1. Quyền tối cao cho tài khoản của bạn (để bạn luôn làm chủ ổ khóa)
         Sid    = "AllowAccountRoot"
         Effect = "Allow"
         Principal = {
@@ -295,7 +294,6 @@ resource "aws_kms_key" "sns_cmk" {
         Resource = "*"
       },
       {
-        # 2. Cấp quyền ĐÍCH DANH cho Thẻ nhân viên của Lambda (ĐÂY LÀ CHỖ VỪA FIX)
         Sid    = "AllowLambdaExecutionRole"
         Effect = "Allow"
         Principal = {
@@ -312,21 +310,16 @@ resource "aws_kms_key" "sns_cmk" {
   })
 }
 
-# 1. Tạo Kênh thông báo (SNS Topic)
 resource "aws_sns_topic" "cspm_alerts" {
-  name              = "cspm-security-alerts-topic"
-  # kms_master_key_id = aws_kms_key.sns_cmk.arn
+  name = "cspm-security-alerts-topic"
 }
 
-# 2. Đăng ký Email nhận cảnh báo
 resource "aws_sns_topic_subscription" "email_alert" {
   topic_arn = aws_sns_topic.cspm_alerts.arn
   protocol  = "email"
-  # Hãy thay đổi email dưới đây thành email thật của bạn
   endpoint  = "nguyentanloc13102005@gmail.com" 
 }
 
-# 3. Tạo quyền (Policy) cho phép gửi tin nhắn vào SNS VÀ DÙNG KHÓA KMS
 resource "aws_iam_policy" "lambda_sns_publish" {
   name        = "cspm_lambda_sns_publish_policy"
   description = "Cho phep Lambda gui canh bao qua SNS va dung khoa KMS"
@@ -351,8 +344,19 @@ resource "aws_iam_policy" "lambda_sns_publish" {
   })
 }
 
-# 4. Gắn quyền SNS này vào Thẻ nhân viên (Role) của Lambda hiện tại
 resource "aws_iam_role_policy_attachment" "lambda_sns_attach" {
   role       = aws_iam_role.lambda_exec_role.name
   policy_arn = aws_iam_policy.lambda_sns_publish.arn
+}
+
+# =========================================================================
+# PHẦN 5: IN RA KẾT QUẢ ĐỂ GẮN VÀO FRONTEND
+# =========================================================================
+output "api_urls" {
+  value = {
+    get_findings      = "${aws_apigatewayv2_api.cspm_api.api_endpoint}/api/findings"
+    dashboard_summary = "${aws_apigatewayv2_api.cspm_api.api_endpoint}/api/dashboard-summary"
+    remediate         = "${aws_apigatewayv2_api.cspm_api.api_endpoint}/api/findings/{id}/remediate"
+    spam_ips          = "${aws_apigatewayv2_api.cspm_api.api_endpoint}/api/cloudwatch/spam-ips"
+  }
 }
