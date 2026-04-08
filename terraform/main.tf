@@ -141,6 +141,7 @@ resource "aws_lambda_function" "cspm_api_handler" {
   # CHÚ Ý: Chỗ này trỏ tới cái hàm GET dữ liệu của bạn trong thư mục api/
   handler       = "api.get_inventory.lambda_handler"
   runtime       = "python3.10"
+  timeout       = 30
 
   environment {
     variables = {
@@ -178,6 +179,13 @@ resource "aws_lambda_function" "cspm_remediator" {
       DYNAMODB_TABLE = aws_dynamodb_table.cspm_findings.name
     }
   }
+}
+
+# 2c. MỞ THÊM CỬA CHO TÍNH NĂNG SPAM IPS (Dành cho AI Analyst)
+resource "aws_apigatewayv2_route" "get_spam_ips_route" {
+  api_id    = aws_apigatewayv2_api.cspm_api.id
+  route_key = "GET /api/cloudwatch/spam-ips"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
 }
 
 # 3. MỞ THÊM CỬA CHO NÚT SỬA LỖI (MỚI)
@@ -263,17 +271,51 @@ output "api_urls" {
 # PHẦN 3: XÂY DỰNG HỆ THỐNG CẢNH BÁO (AMAZON SNS)
 # =========================================================================
 
-# 0. Tạo KMS Key để mã hóa SNS Topic
+# Nhớ giữ nguyên dòng này ở trên cùng phần KMS nhé
+data "aws_caller_identity" "current" {}
+
+# 0. Tạo KMS Key và dán "Nội quy mở khóa" (Policy) CHUẨN 100%
 resource "aws_kms_key" "sns_cmk" {
   description             = "CMK for CSPM SNS Topic encryption"
   deletion_window_in_days = 7
   enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Id      = "cspm-kms-policy"
+    Statement = [
+      {
+        # 1. Quyền tối cao cho tài khoản của bạn (để bạn luôn làm chủ ổ khóa)
+        Sid    = "AllowAccountRoot"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        # 2. Cấp quyền ĐÍCH DANH cho Thẻ nhân viên của Lambda (ĐÂY LÀ CHỖ VỪA FIX)
+        Sid    = "AllowLambdaExecutionRole"
+        Effect = "Allow"
+        Principal = {
+          AWS = aws_iam_role.lambda_exec_role.arn
+        }
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
 }
 
 # 1. Tạo Kênh thông báo (SNS Topic)
 resource "aws_sns_topic" "cspm_alerts" {
   name              = "cspm-security-alerts-topic"
-  kms_master_key_id = aws_kms_key.sns_cmk.arn
+  # kms_master_key_id = aws_kms_key.sns_cmk.arn
 }
 
 # 2. Đăng ký Email nhận cảnh báo
@@ -297,13 +339,13 @@ resource "aws_iam_policy" "lambda_sns_publish" {
         Resource = aws_sns_topic.cspm_alerts.arn
       },
       {
-        # BẮT BUỘC PHẢI CÓ DÒNG NÀY THÌ MỚI GỬI ĐƯỢC MAIL KHI ĐÃ BẬT KMS
         Action = [
           "kms:GenerateDataKey*",
-          "kms:Decrypt"
+          "kms:Decrypt",
+          "kms:CreateGrant"
         ]
         Effect   = "Allow"
-        Resource = aws_kms_key.sns_cmk.arn
+        Resource = "*"
       }
     ]
   })

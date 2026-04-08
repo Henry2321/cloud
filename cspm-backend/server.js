@@ -13,8 +13,6 @@ const cloudwatchlogs = new AWS.CloudWatchLogs({
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
 });
 
-console.log(process.env.AWS_SECRET_ACCESS_KEY)
-
 function loadFindingsSync() {
   return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
 }

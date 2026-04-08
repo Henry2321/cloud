@@ -1,17 +1,68 @@
-# Loại bỏ thư mục plugin của Terraform (thủ phạm gây lỗi)
+# ==========================================
+# 1. TERRAFORM (Hạ tầng AWS)
+# ==========================================
+# Thư mục chứa plugin và cache của Terraform
 .terraform/
 
-# Loại bỏ các file trạng thái (chứa thông tin nhạy cảm)
+# File trạng thái (Chứa ID AWS và dữ liệu nhạy cảm)
 *.tfstate
 *.tfstate.*
 
-# Loại bỏ file biến chứa mật khẩu/token
+# File khai báo biến chứa mật khẩu/token cấu hình riêng
 *.tfvars
 *.tfvars.json
 
-# Loại bỏ các file log
-*.log
+# File log báo lỗi của Terraform
+crash.log
 
-.env
-.env.*
+# ==========================================
+# 2. PYTHON / LAMBDA BACKEND (Code Bot Quét)
+# ==========================================
+# Thư mục rác do Python tự sinh ra khi chạy
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Môi trường ảo của Python (nếu có dùng)
+venv/
+env/
+.env_python/
+
+# File nén ZIP chứa code Lambda đẩy lên AWS (Cực kỳ nặng và không cần thiết đưa lên Git)
+*.zip
+cspm_backend_payload.zip
+
+# ==========================================
+# 3. NODE.JS / REACT FRONTEND (Giao diện Web)
+# ==========================================
+# Thư mục thư viện cực nặng của Node.js
 node_modules/
+
+# File môi trường chứa API Key, URL nhạy cảm
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Thư mục build (chứa code đã đóng gói, không cần push lên)
+build/
+dist/
+
+# File log lỗi của npm/yarn
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ==========================================
+# 4. HỆ ĐIỀU HÀNH & EDITOR (Rác hệ thống)
+# ==========================================
+# Rác của macOS
+.DS_Store
+
+# Rác của Windows
+Thumbs.db
+
+# Rác của VS Code / IntelliJ
+.vscode/
+.idea/
