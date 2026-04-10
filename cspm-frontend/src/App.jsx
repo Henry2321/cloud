@@ -6,6 +6,7 @@ import {
   useState
 } from 'react';
 import { getDashboardSummary, getFindings, getSpamIps, remediateFinding, triggerScan } from './lib/api';
+import Auth from './Auth';
 
 const navItems = [
   { id: 'profile', label: 'Profile', icon: UserIcon },
@@ -29,21 +30,124 @@ const initialSummary = {
 };
 
 const severityOptions = ['All', 'Fail', 'Warning', 'Pass'];
-const statusOptions = ['All', 'Open', 'Resolved'];
 
 function App() {
+  const [user, setUser] = useState(() => localStorage.getItem('cspm_session') || '');
   const [search, setSearch] = useState('');
   const [severity, setSeverity] = useState('All');
   const [service, setService] = useState('All');
-  const [status, setStatus] = useState('All');
   const [summary, setSummary] = useState(initialSummary);
   const [findings, setFindings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionFindingId, setActionFindingId] = useState('');
-  const [remediateMsg, setRemediateMsg] = useState({});  // { [findingId]: { ok, text } }
+  const [remediateMsg, setRemediateMsg] = useState({});
   const [scanning, setScanning] = useState(false);
   const [scanMsg, setScanMsg] = useState('');
+  const [spamIps, setSpamIps] = useState([]);
+  const [spamLoading, setSpamLoading] = useState(true);
+
+  const deferredSearch = useDeferredValue(search);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadSpamIps() {
+      setSpamLoading(true);
+      try {
+        const data = await getSpamIps(controller.signal);
+        setSpamIps(data.spamIps || []);
+      } catch (e) {
+        if (e.name !== 'AbortError') setSpamIps([]);
+      } finally {
+        setSpamLoading(false);
+      }
+    }
+    loadSpamIps();
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadDashboard() {
+      setLoading(true);
+      setError('');
+      try {
+        const [summaryPayload, findingsPayload] = await Promise.all([
+          getDashboardSummary(controller.signal),
+          getFindings(controller.signal)
+        ]);
+        startTransition(() => {
+          setSummary(summaryPayload.summary);
+          setFindings(findingsPayload.findings);
+        });
+      } catch (loadError) {
+        if (loadError.name !== 'AbortError') {
+          setError(loadError.message || 'Unable to load dashboard data.');
+        }
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadDashboard();
+    return () => controller.abort();
+  }, []);
+
+  const serviceOptions = useMemo(() => {
+    const uniqueServices = Array.from(new Set(findings.map((item) => item.service)));
+    return ['All', ...uniqueServices];
+  }, [findings]);
+
+  const distribution = useMemo(() => {
+    if (!findings.length) return [
+      { label: 'Pass', value: 0, color: 'var(--mint)', muted: 'var(--mint-soft)', share: 0 },
+      { label: 'Warning', value: 0, color: 'var(--amber)', muted: 'var(--amber-soft)', share: 0 },
+      { label: 'Fail', value: 0, color: 'var(--coral)', muted: 'var(--coral-soft)', share: 0 },
+    ];
+    const latestDate = findings.reduce((max, f) => {
+      const d = new Date(f.timestamp);
+      return d > max ? d : max;
+    }, new Date(0));
+    const latestDay = latestDate.toISOString().slice(0, 10);
+    const recent = findings.filter(f => f.timestamp && f.timestamp.slice(0, 10) === latestDay);
+    const src = recent.length ? recent : findings;
+    const counts = src.reduce((acc, f) => {
+      const sev = (f.severity || '').toUpperCase();
+      if (sev === 'Fail' || sev === 'FAIL' || sev === 'HIGH' || sev === 'CRITICAL') acc.failed++;
+      else if (sev === 'Warning' || sev === 'WARNING' || sev === 'MEDIUM') acc.warning++;
+      else acc.passed++;
+      return acc;
+    }, { passed: 0, warning: 0, failed: 0 });
+    const total = counts.passed + counts.warning + counts.failed;
+    return [
+      { label: 'Pass', value: counts.passed, color: 'var(--mint)', muted: 'var(--mint-soft)', share: total ? Math.round((counts.passed / total) * 100) : 0 },
+      { label: 'Warning', value: counts.warning, color: 'var(--amber)', muted: 'var(--amber-soft)', share: total ? Math.round((counts.warning / total) * 100) : 0 },
+      { label: 'Fail', value: counts.failed, color: 'var(--coral)', muted: 'var(--coral-soft)', share: total ? Math.round((counts.failed / total) * 100) : 0 },
+    ];
+  }, [findings]);
+
+  const filteredFindings = useMemo(() => {
+    return findings.filter((item) => {
+      const matchesSearch =
+        !deferredSearch ||
+        item.title.toLowerCase().includes(deferredSearch.toLowerCase()) ||
+        item.time.toLowerCase().includes(deferredSearch.toLowerCase()) ||
+        item.rule_name.toLowerCase().includes(deferredSearch.toLowerCase());
+      const matchesSeverity = severity === 'All' ||
+        (severity === 'Fail' && ['FAIL', 'HIGH', 'CRITICAL'].includes((item.severity || '').toUpperCase())) ||
+        (severity === 'Warning' && ['WARNING', 'MEDIUM'].includes((item.severity || '').toUpperCase())) ||
+        (severity === 'Pass' && ['PASS', 'LOW'].includes((item.severity || '').toUpperCase()));
+      const matchesService = service === 'All' || item.service === service;
+      return matchesSearch && matchesSeverity && matchesService;
+    });
+  }, [findings, deferredSearch, severity, service]);
+
+  // --- sau tất cả hooks mới được return sớm ---
+  if (!user) return <Auth onLogin={setUser} />;
+
+  function handleLogout() {
+    localStorage.removeItem('cspm_session');
+    setUser('');
+  }
 
   async function handleScan() {
     setScanning(true);
@@ -65,113 +169,6 @@ function App() {
       setScanning(false);
     }
   }
-
-  const deferredSearch = useDeferredValue(search);
-
-  const [spamIps, setSpamIps] = useState([]);
-  const [spamLoading, setSpamLoading] = useState(true);
-
-useEffect(() => {
-    const controller = new AbortController();
-    async function loadSpamIps() {
-      setSpamLoading(true);
-      try {
-        const data = await getSpamIps(controller.signal);
-        setSpamIps(data.spamIps || []);
-      } catch (e) {
-        if (e.name !== 'AbortError') setSpamIps([]);
-      } finally {
-        setSpamLoading(false);
-      }
-    }
-    loadSpamIps();
-    return () => controller.abort();
-  }, []);
-  useEffect(() => {
-    const controller = new AbortController();
-
-    async function loadDashboard() {
-      setLoading(true);
-      setError('');
-
-      try {
-        const [summaryPayload, findingsPayload] = await Promise.all([
-          getDashboardSummary(controller.signal),
-          getFindings(controller.signal)
-        ]);
-
-        startTransition(() => {
-          setSummary(summaryPayload.summary);
-          setFindings(findingsPayload.findings);
-        });
-      } catch (loadError) {
-        if (loadError.name !== 'AbortError') {
-          setError(loadError.message || 'Unable to load dashboard data.');
-        }
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    loadDashboard();
-
-    return () => controller.abort();
-  }, []);
-
-  const serviceOptions = useMemo(() => {
-    const uniqueServices = Array.from(new Set(findings.map((item) => item.service)));
-    return ['All', ...uniqueServices];
-  }, [findings]);
-
-  const distribution = useMemo(() => {
-    const total = summary.passed + summary.warning + summary.failed + summary.unknown;
-
-    return [
-      {
-        label: 'Pass',
-        value: summary.passed,
-        color: 'var(--mint)',
-        muted: 'var(--mint-soft)',
-        share: total ? Math.round((summary.passed / total) * 100) : 0
-      },
-      {
-        label: 'Warning',
-        value: summary.warning,
-        color: 'var(--amber)',
-        muted: 'var(--amber-soft)',
-        share: total ? Math.round((summary.warning / total) * 100) : 0
-      },
-      {
-        label: 'Fail',
-        value: summary.failed,
-        color: 'var(--coral)',
-        muted: 'var(--coral-soft)',
-        share: total ? Math.round((summary.failed / total) * 100) : 0
-      },
-      {
-        label: 'Unknown',
-        value: summary.unknown,
-        color: 'var(--slate)',
-        muted: 'var(--slate-soft)',
-        share: total ? Math.round((summary.unknown / total) * 100) : 0
-      }
-    ];
-  }, [summary]);
-
-  const filteredFindings = useMemo(() => {
-    return findings.filter((item) => {
-      const matchesSearch =
-        !deferredSearch ||
-        item.title.toLowerCase().includes(deferredSearch.toLowerCase()) ||
-        item.time.toLowerCase().includes(deferredSearch.toLowerCase()) ||
-        item.rule_name.toLowerCase().includes(deferredSearch.toLowerCase());
-      const matchesSeverity = severity === 'All' || item.severity === severity;
-      const matchesService = service === 'All' || item.service === service;
-      const matchesStatus = status === 'All' || item.status === status;
-
-      return matchesSearch && matchesSeverity && matchesService && matchesStatus;
-    });
-  }, [findings, deferredSearch, severity, service, status]);
 
   const pieGradient = createPieGradient(distribution);
   const activityLabel = summary.resolved_findings
@@ -235,6 +232,10 @@ useEffect(() => {
             </div>
 
             <div className="topbar-actions">
+              <span style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>👤 {user}</span>
+              <button className="ghost-button" type="button" onClick={handleLogout} style={{ minWidth: 'auto', padding: '0.6rem 1rem' }}>
+                Đăng xuất
+              </button>
               {scanMsg && (
                 <span style={{ fontSize: '0.75rem', color: scanMsg.startsWith('Scan failed') ? 'var(--coral)' : 'var(--mint)' }}>
                   {scanMsg}
@@ -247,12 +248,6 @@ useEffect(() => {
                 disabled={scanning}
               >
                 {scanning ? 'Scanning...' : '🔍 Scan Now'}
-              </button>
-              <button className="ghost-button" type="button">
-                Local API
-              </button>
-              <button className="primary-button" type="button">
-                Dashboard Online
               </button>
             </div>
           </div>
@@ -303,7 +298,7 @@ useEffect(() => {
               </div>
 
               <div className="legend-list">
-                {distribution.slice(0, 3).map((item) => (
+                {distribution.map((item) => (
                   <div
                     key={item.label}
                     className="legend-item"
@@ -329,9 +324,9 @@ useEffect(() => {
 
             <div className="bar-chart">
               <div className="bar-chart__axis">
-                <span>100</span>
-                <span>50</span>
-                <span>0</span>
+                <span>100%</span>
+                <span>50%</span>
+                <span>0%</span>
               </div>
 
               <div className="bar-chart__plot">
@@ -341,13 +336,14 @@ useEffect(() => {
                       <div
                         className="bar-fill"
                         style={{
-                          '--bar-height': `${item.value > 0 ? Math.max(item.share, 6) : 0}%`,
+                          '--bar-height': `${item.share}%`,
                           '--bar-color': item.color,
                           '--bar-glow': item.muted
                         }}
                       />
                     </div>
                     <span>{item.label}</span>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{item.share}%</span>
                   </div>
                 ))}
               </div>
@@ -444,12 +440,6 @@ useEffect(() => {
               options={serviceOptions}
               onChange={setService}
             />
-            <FilterSelect
-              label="Status"
-              value={status}
-              options={statusOptions}
-              onChange={setStatus}
-            />
           </div>
 
           <div className="results-meta">
@@ -479,7 +469,7 @@ useEffect(() => {
                   style={{ animationDelay: `${index * 90}ms` }}
                 >
                   <div className="finding-copy">
-                    <h3>{item.title}</h3>
+                    <h3>{item.service} | {item.title || '—'} | {item.rule_name}</h3>
                     <p>{item.time}</p>
                     {remediateMsg[item.id] && (
                       <p style={{ fontSize: '0.75rem', marginTop: '4px', color: remediateMsg[item.id].ok ? 'var(--mint)' : 'var(--coral)' }}>
@@ -657,6 +647,29 @@ function ShieldIcon() {
       />
     </svg>
   );
+}
+
+function extractAccountId(resourceId) {
+  if (!resourceId) return '';
+  const arnMatch = resourceId.match(/arn:[^:]+:[^:]+:[^:]*:[^:]*[:/](.+)$/);
+  if (arnMatch) return arnMatch[1];
+  return resourceId;
+}
+
+function extractName(item) {
+  // Parse từ title: "SERVICE: tên | details"
+  if (item.title) {
+    const colonIdx = item.title.indexOf(':');
+    if (colonIdx !== -1) {
+      const afterColon = item.title.slice(colonIdx + 1).trim();
+      const pipeIdx = afterColon.indexOf('|');
+      const name = pipeIdx !== -1 ? afterColon.slice(0, pipeIdx).trim() : afterColon.trim();
+      if (name) return name;
+    }
+  }
+  if (item.resource_name) return item.resource_name;
+  if (item.resource_id) return extractAccountId(item.resource_id);
+  return '—';
 }
 
 export default App;
