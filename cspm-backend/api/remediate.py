@@ -3,6 +3,7 @@ from core.config import DYNAMODB_TABLE, logger
 from core.aws_connection import get_boto3_resource
 from remediations.s3_remediator import fix_s3_public_access
 from remediations.sg_remediator import remove_open_ssh
+from remediations.iam_remediator import enforce_mfa_policy
 
 try:
     dynamodb = get_boto3_resource('dynamodb')
@@ -45,6 +46,9 @@ def lambda_handler(event, context):
             # resource_id dạng arn:aws:ec2:::security-group/sg-xxxxxxxx
             sg_id = resource_id.split('/')[-1] if '/' in resource_id else resource_name
             success = remove_open_ssh(sg_id)
+
+        elif service == 'IAM' and rule_name == 'IAM_User_MFA_Enabled':
+            success = enforce_mfa_policy(resource_name)
 
         else:
             return _response(400, {"message": f"Chưa hỗ trợ tự động remediate cho {service} / {rule_name}"})

@@ -49,6 +49,23 @@ resource "aws_iam_role_policy_attachment" "lambda_security_audit" {
   role       = aws_iam_role.lambda_exec_role.name
   policy_arn = "arn:aws:iam::aws:policy/SecurityAudit"
 }
+
+# Quyen de Remediate IAM: attach inline policy buoc user bat MFA
+resource "aws_iam_policy" "lambda_iam_remediate" {
+  name = "cspm_lambda_iam_remediate_policy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["iam:PutUserPolicy", "iam:GetUser"]
+      Resource = "arn:aws:iam::*:user/*"
+    }]
+  })
+}
+resource "aws_iam_role_policy_attachment" "lambda_iam_remediate" {
+  role       = aws_iam_role.lambda_exec_role.name
+  policy_arn = aws_iam_policy.lambda_iam_remediate.arn
+}
 # Quyền của Phúc: Đọc CloudWatch Logs cho tính năng Spam IP
 resource "aws_iam_role_policy_attachment" "lambda_cloudwatch_read" {
   role       = aws_iam_role.lambda_exec_role.name
