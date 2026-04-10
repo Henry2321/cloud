@@ -3,16 +3,22 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
-  useState
-} from 'react';
-import { getDashboardSummary, getFindings, getSpamIps, remediateFinding, triggerScan } from './lib/api';
+  useState,
+} from "react";
+import {
+  getDashboardSummary,
+  getFindings,
+  getSpamIps,
+  remediateFinding,
+  triggerScan,
+} from "./lib/api";
 
 const navItems = [
-  { id: 'profile', label: 'Profile', icon: UserIcon },
-  { id: 'dashboard', label: 'Dashboard', icon: DashboardIcon, active: true },
-  { id: 'assets', label: 'Assets', icon: LayersIcon },
-  { id: 'alerts', label: 'Alerts', icon: BellIcon },
-  { id: 'settings', label: 'Settings', icon: CogIcon }
+  { id: "profile", label: "Profile", icon: UserIcon },
+  { id: "dashboard", label: "Dashboard", icon: DashboardIcon, active: true },
+  { id: "assets", label: "Assets", icon: LayersIcon },
+  { id: "alerts", label: "Alerts", icon: BellIcon },
+  { id: "settings", label: "Settings", icon: CogIcon },
 ];
 
 const initialSummary = {
@@ -25,61 +31,36 @@ const initialSummary = {
   unknown: 0,
   open_findings: 0,
   resolved_findings: 0,
-  last_updated: null
+  last_updated: null,
 };
 
-const severityOptions = ['All', 'Fail', 'Warning', 'Pass'];
-const statusOptions = ['All', 'Open', 'Resolved'];
+const severityOptions = ["All", "Fail", "Warning", "Pass"];
+const statusOptions = ["All", "Open", "Resolved"];
 
 function App() {
-  const [search, setSearch] = useState('');
-  const [severity, setSeverity] = useState('All');
-  const [service, setService] = useState('All');
-  const [status, setStatus] = useState('All');
+  const [search, setSearch] = useState("");
+  const [severity, setSeverity] = useState("All");
+  const [service, setService] = useState("All");
+  const [status, setStatus] = useState("All");
   const [summary, setSummary] = useState(initialSummary);
   const [findings, setFindings] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [actionFindingId, setActionFindingId] = useState('');
-  const [remediateMsg, setRemediateMsg] = useState({});  // { [findingId]: { ok, text } }
-  const [scanning, setScanning] = useState(false);
-  const [scanMsg, setScanMsg] = useState('');
-
-  async function handleScan() {
-    setScanning(true);
-    setScanMsg('');
-    try {
-      await triggerScan();
-      const [summaryPayload, findingsPayload] = await Promise.all([
-        getDashboardSummary(),
-        getFindings()
-      ]);
-      startTransition(() => {
-        setSummary(summaryPayload.summary);
-        setFindings(findingsPayload.findings);
-      });
-      setScanMsg('Scan completed!');
-    } catch (e) {
-      setScanMsg('Scan failed: ' + (e.message || 'Unknown error'));
-    } finally {
-      setScanning(false);
-    }
-  }
-
+  const [error, setError] = useState("");
+  const [actionFindingId, setActionFindingId] = useState("");
+  const [spamData, setSpamData] = useState(null);
   const deferredSearch = useDeferredValue(search);
-
   const [spamIps, setSpamIps] = useState([]);
   const [spamLoading, setSpamLoading] = useState(true);
 
-useEffect(() => {
+  useEffect(() => {
     const controller = new AbortController();
     async function loadSpamIps() {
       setSpamLoading(true);
       try {
         const data = await getSpamIps(controller.signal);
-        setSpamIps(data.spamIps || []);
+        setSpamData(data);
       } catch (e) {
-        if (e.name !== 'AbortError') setSpamIps([]);
+        if (e.name !== "AbortError") setSpamIps([]);
       } finally {
         setSpamLoading(false);
       }
@@ -92,12 +73,12 @@ useEffect(() => {
 
     async function loadDashboard() {
       setLoading(true);
-      setError('');
+      setError("");
 
       try {
         const [summaryPayload, findingsPayload] = await Promise.all([
           getDashboardSummary(controller.signal),
-          getFindings(controller.signal)
+          getFindings(controller.signal),
         ]);
 
         startTransition(() => {
@@ -105,8 +86,8 @@ useEffect(() => {
           setFindings(findingsPayload.findings);
         });
       } catch (loadError) {
-        if (loadError.name !== 'AbortError') {
-          setError(loadError.message || 'Unable to load dashboard data.');
+        if (loadError.name !== "AbortError") {
+          setError(loadError.message || "Unable to load dashboard data.");
         }
       } finally {
         setLoading(false);
@@ -119,42 +100,45 @@ useEffect(() => {
   }, []);
 
   const serviceOptions = useMemo(() => {
-    const uniqueServices = Array.from(new Set(findings.map((item) => item.service)));
-    return ['All', ...uniqueServices];
+    const uniqueServices = Array.from(
+      new Set(findings.map((item) => item.service)),
+    );
+    return ["All", ...uniqueServices];
   }, [findings]);
 
   const distribution = useMemo(() => {
-    const total = summary.passed + summary.warning + summary.failed + summary.unknown;
+    const total =
+      summary.passed + summary.warning + summary.failed + summary.unknown;
 
     return [
       {
-        label: 'Pass',
+        label: "Pass",
         value: summary.passed,
-        color: 'var(--mint)',
-        muted: 'var(--mint-soft)',
-        share: total ? Math.round((summary.passed / total) * 100) : 0
+        color: "var(--mint)",
+        muted: "var(--mint-soft)",
+        share: total ? Math.round((summary.passed / total) * 100) : 0,
       },
       {
-        label: 'Warning',
+        label: "Warning",
         value: summary.warning,
-        color: 'var(--amber)',
-        muted: 'var(--amber-soft)',
-        share: total ? Math.round((summary.warning / total) * 100) : 0
+        color: "var(--amber)",
+        muted: "var(--amber-soft)",
+        share: total ? Math.round((summary.warning / total) * 100) : 0,
       },
       {
-        label: 'Fail',
+        label: "Fail",
         value: summary.failed,
-        color: 'var(--coral)',
-        muted: 'var(--coral-soft)',
-        share: total ? Math.round((summary.failed / total) * 100) : 0
+        color: "var(--coral)",
+        muted: "var(--coral-soft)",
+        share: total ? Math.round((summary.failed / total) * 100) : 0,
       },
       {
-        label: 'Unknown',
+        label: "Unknown",
         value: summary.unknown,
-        color: 'var(--slate)',
-        muted: 'var(--slate-soft)',
-        share: total ? Math.round((summary.unknown / total) * 100) : 0
-      }
+        color: "var(--slate)",
+        muted: "var(--slate-soft)",
+        share: total ? Math.round((summary.unknown / total) * 100) : 0,
+      },
     ];
   }, [summary]);
 
@@ -165,18 +149,20 @@ useEffect(() => {
         item.title.toLowerCase().includes(deferredSearch.toLowerCase()) ||
         item.time.toLowerCase().includes(deferredSearch.toLowerCase()) ||
         item.rule_name.toLowerCase().includes(deferredSearch.toLowerCase());
-      const matchesSeverity = severity === 'All' || item.severity === severity;
-      const matchesService = service === 'All' || item.service === service;
-      const matchesStatus = status === 'All' || item.status === status;
+      const matchesSeverity = severity === "All" || item.severity === severity;
+      const matchesService = service === "All" || item.service === service;
+      const matchesStatus = status === "All" || item.status === status;
 
-      return matchesSearch && matchesSeverity && matchesService && matchesStatus;
+      return (
+        matchesSearch && matchesSeverity && matchesService && matchesStatus
+      );
     });
   }, [findings, deferredSearch, severity, service, status]);
 
   const pieGradient = createPieGradient(distribution);
   const activityLabel = summary.resolved_findings
     ? `${summary.resolved_findings} resolved`
-    : 'Awaiting review';
+    : "Awaiting review";
 
   async function handleRemediate(findingId) {
     setActionFindingId(findingId);
@@ -184,20 +170,29 @@ useEffect(() => {
 
     try {
       const result = await remediateFinding(findingId);
-      setRemediateMsg((prev) => ({ ...prev, [findingId]: { ok: true, text: result.message || 'Khắc phục thành công!' } }));
+      setRemediateMsg((prev) => ({
+        ...prev,
+        [findingId]: {
+          ok: true,
+          text: result.message || "Khắc phục thành công!",
+        },
+      }));
       const [summaryPayload, findingsPayload] = await Promise.all([
         getDashboardSummary(),
-        getFindings()
+        getFindings(),
       ]);
       startTransition(() => {
         setSummary(summaryPayload.summary);
         setFindings(findingsPayload.findings);
       });
     } catch (actionError) {
-      const msg = actionError.message || 'Không thể tự động khắc phục.';
-      setRemediateMsg((prev) => ({ ...prev, [findingId]: { ok: false, text: msg } }));
+      const msg = actionError.message || "Không thể tự động khắc phục.";
+      setRemediateMsg((prev) => ({
+        ...prev,
+        [findingId]: { ok: false, text: msg },
+      }));
     } finally {
-      setActionFindingId('');
+      setActionFindingId("");
     }
   }
 
@@ -215,7 +210,7 @@ useEffect(() => {
           {navItems.map(({ id, label, icon: Icon, active }) => (
             <button
               key={id}
-              className={`nav-chip${active ? ' is-active' : ''}`}
+              className={`nav-chip${active ? " is-active" : ""}`}
               type="button"
               aria-label={label}
               title={label}
@@ -236,7 +231,14 @@ useEffect(() => {
 
             <div className="topbar-actions">
               {scanMsg && (
-                <span style={{ fontSize: '0.75rem', color: scanMsg.startsWith('Scan failed') ? 'var(--coral)' : 'var(--mint)' }}>
+                <span
+                  style={{
+                    fontSize: "0.75rem",
+                    color: scanMsg.startsWith("Scan failed")
+                      ? "var(--coral)"
+                      : "var(--mint)",
+                  }}
+                >
                   {scanMsg}
                 </span>
               )}
@@ -246,7 +248,7 @@ useEffect(() => {
                 onClick={handleScan}
                 disabled={scanning}
               >
-                {scanning ? 'Scanning...' : '🔍 Scan Now'}
+                {scanning ? "Scanning..." : "🔍 Scan Now"}
               </button>
               <button className="ghost-button" type="button">
                 Local API
@@ -274,7 +276,7 @@ useEffect(() => {
             <div className="score-content">
               <div
                 className="progress-ring"
-                style={{ '--progress': `${summary.security_score}%` }}
+                style={{ "--progress": `${summary.security_score}%` }}
                 aria-label={`Security score ${summary.security_score}%`}
               >
                 <div className="progress-ring__inner">
@@ -295,7 +297,10 @@ useEffect(() => {
             </div>
 
             <div className="pie-card__body">
-              <div className="pie-ring" style={{ '--pie-gradient': pieGradient }}>
+              <div
+                className="pie-ring"
+                style={{ "--pie-gradient": pieGradient }}
+              >
                 <div className="pie-ring__inner">
                   <strong>{summary.total_assets}</strong>
                   <span>Assets</span>
@@ -307,7 +312,10 @@ useEffect(() => {
                   <div
                     key={item.label}
                     className="legend-item"
-                    style={{ '--legend-color': item.color, '--legend-bg': item.muted }}
+                    style={{
+                      "--legend-color": item.color,
+                      "--legend-bg": item.muted,
+                    }}
                   >
                     <span className="legend-dot" />
                     <span className="legend-text">
@@ -341,9 +349,9 @@ useEffect(() => {
                       <div
                         className="bar-fill"
                         style={{
-                          '--bar-height': `${item.value > 0 ? Math.max(item.share, 6) : 0}%`,
-                          '--bar-color': item.color,
-                          '--bar-glow': item.muted
+                          "--bar-height": `${item.value > 0 ? Math.max(item.share, 6) : 0}%`,
+                          "--bar-color": item.color,
+                          "--bar-glow": item.muted,
                         }}
                       />
                     </div>
@@ -355,22 +363,44 @@ useEffect(() => {
           </article>
         </section>
 
-        <section className="panel findings-panel" style={{ marginBottom: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+        <section
+          className="panel findings-panel"
+          style={{ marginBottom: "1rem" }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "1rem",
+            }}
+          >
             <div>
               <p className="eyebrow">CloudWatch · Lambda</p>
-              <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>Spam IP Detection</h2>
+              <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 600 }}>
+                Spam IP Detection
+              </h2>
             </div>
-            <span className="inline-pill" style={{
-              background: spamIps.length ? 'rgba(220,53,69,0.12)' : 'rgba(25,200,100,0.12)',
-              color: spamIps.length ? '#dc3545' : '#19c864',
-              padding: '4px 12px',
-              borderRadius: '999px',
-              fontSize: '0.75rem',
-              fontWeight: 600
-            }}>
-              {spamIps.length ? `${spamIps.length} threat${spamIps.length > 1 ? 's' : ''} detected` : 'Clean'}
-            </span>
+            {!spamLoading && spamData && (
+              <span
+                style={{
+                  background: spamData.current.spamIps.length
+                    ? "rgba(220,53,69,0.12)"
+                    : "rgba(25,200,100,0.12)",
+                  color: spamData.current.spamIps.length
+                    ? "#dc3545"
+                    : "#19c864",
+                  padding: "4px 12px",
+                  borderRadius: "999px",
+                  fontSize: "0.75rem",
+                  fontWeight: 600,
+                }}
+              >
+                {spamData.current.spamIps.length
+                  ? `${spamData.current.spamIps.length} threat${spamData.current.spamIps.length > 1 ? "s" : ""} detected`
+                  : "Clean"}
+              </span>
+            )}
           </div>
 
           {spamLoading && (
@@ -380,46 +410,129 @@ useEffect(() => {
             </div>
           )}
 
-          {!spamLoading && spamIps.length === 0 && (
-            <div className="empty-state">
-              <ShieldIcon />
-              <p>No spam IPs detected in the last 24 hours.</p>
-            </div>
-          )}
+          {!spamLoading && spamData && (
+            <>
+              {spamData.current.spamIps.length === 0 ? (
+                <div className="empty-state">
+                  <ShieldIcon />
+                  <p>No spam IPs detected in this window.</p>
+                </div>
+              ) : (
+                <div className="finding-list">
+                  {spamData.current.spamIps
+                    .sort((a, b) => b.count - a.count)
+                    .map((item, index) => (
+                      <article
+                        key={item.ip}
+                        className="finding-row"
+                        style={{ animationDelay: `${index * 60}ms` }}
+                      >
+                        <div className="finding-copy">
+                          <h3
+                            style={{
+                              fontFamily: "monospace",
+                              letterSpacing: "0.03em",
+                            }}
+                          >
+                            {item.ip}
+                          </h3>
+                          <p>
+                            {item.count} requests ·{" "}
+                            {new Date(
+                              spamData.current.window_from,
+                            ).toLocaleTimeString("vi-VN", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                            {" → "}
+                            {new Date(
+                              spamData.current.window_to,
+                            ).toLocaleTimeString("vi-VN", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </p>
+                        </div>
+                        <span className="status-chip status-chip--fail">
+                          {item.count > 10
+                            ? "Critical"
+                            : item.count > 5
+                              ? "High"
+                              : "Medium"}
+                        </span>
+                        <button
+                          type="button"
+                          className="action-button"
+                          onClick={() =>
+                            navigator.clipboard?.writeText(item.ip)
+                          }
+                        >
+                          Copy IP
+                        </button>
+                      </article>
+                    ))}
+                </div>
+              )}
 
-          {!spamLoading && spamIps.length > 0 && (
-            <div className="finding-list">
-              {spamIps
-                .sort((a, b) => b.count - a.count)
-                .map((item, index) => (
-                  <article
-                    key={item.ip}
-                    className="finding-row"
-                    style={{ animationDelay: `${index * 60}ms` }}
+              {/* History */}
+              {spamData.history.length > 0 && (
+                <details style={{ marginTop: "1rem" }}>
+                  <summary
+                    style={{
+                      fontSize: "0.8rem",
+                      color: "var(--color-text-secondary, #aaa)",
+                      cursor: "pointer",
+                      padding: "6px 0",
+                      userSelect: "none",
+                    }}
                   >
-                    <div className="finding-copy">
-                      <h3 style={{ fontFamily: 'monospace', letterSpacing: '0.03em' }}>{item.ip}</h3>
-                      <p>{item.count} requests · Last 24h</p>
-                    </div>
-
-                    <span className="status-chip status-chip--fail">
-                      {item.count > 50 ? 'Critical' : item.count > 20 ? 'High' : 'Medium'}
-                    </span>
-
-                    <button
-                      type="button"
-                      className="action-button"
-                      onClick={() => navigator.clipboard?.writeText(item.ip)}
-                      title="Copy IP to clipboard"
-                    >
-                      Copy IP
-                    </button>
-                  </article>
-                ))}
-            </div>
+                    History · {spamData.history.length} entries
+                  </summary>
+                  <div className="finding-list" style={{ marginTop: "0.5rem" }}>
+                    {spamData.history.map((entry) => (
+                      <article key={entry.id} className="finding-row">
+                        <div className="finding-copy">
+                          {entry.spam_ips.map((ip) => (
+                            <h3
+                              key={ip.ip}
+                              style={{
+                                fontFamily: "monospace",
+                                letterSpacing: "0.03em",
+                                marginBottom: "2px",
+                              }}
+                            >
+                              {ip.ip}
+                            </h3>
+                          ))}
+                          <p>
+                            {new Date(entry.window_from).toLocaleTimeString(
+                              "vi-VN",
+                              { hour: "2-digit", minute: "2-digit" },
+                            )}
+                            {" -> "}
+                            {new Date(entry.window_to).toLocaleTimeString(
+                              "vi-VN",
+                              { hour: "2-digit", minute: "2-digit" },
+                            )}
+                            {" ngày "}
+                            {new Date(entry.window_from).toLocaleDateString(
+                              "vi-VN",
+                            )}
+                          </p>
+                        </div>
+                        <span className="status-chip status-chip--fail">
+                          {entry.spam_ips
+                            .map((ip) => `${ip.count} req`)
+                            .join(" · ")}
+                        </span>
+                      </article>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </>
           )}
         </section>
-
         <section className="panel findings-panel">
           <div className="search-shell">
             <SearchIcon />
@@ -459,7 +572,7 @@ useEffect(() => {
             <span className="inline-pill">
               {summary.last_updated
                 ? `Last updated ${formatLastUpdated(summary.last_updated)}`
-                : 'Waiting for backend'}
+                : "Waiting for backend"}
             </span>
           </div>
 
@@ -482,23 +595,39 @@ useEffect(() => {
                     <h3>{item.title}</h3>
                     <p>{item.time}</p>
                     {remediateMsg[item.id] && (
-                      <p style={{ fontSize: '0.75rem', marginTop: '4px', color: remediateMsg[item.id].ok ? 'var(--mint)' : 'var(--coral)' }}>
+                      <p
+                        style={{
+                          fontSize: "0.75rem",
+                          marginTop: "4px",
+                          color: remediateMsg[item.id].ok
+                            ? "var(--mint)"
+                            : "var(--coral)",
+                        }}
+                      >
                         {remediateMsg[item.id].text}
                       </p>
                     )}
                   </div>
 
-                  <span className={`status-chip status-chip--${item.severity.toLowerCase()}`}>
+                  <span
+                    className={`status-chip status-chip--${item.severity.toLowerCase()}`}
+                  >
                     {item.severity}
                   </span>
 
                   <button
                     type="button"
-                    disabled={item.status === 'PASS' || actionFindingId === item.id}
-                    className={`action-button${item.status === 'PASS' ? ' is-muted' : ''}`}
+                    disabled={
+                      item.status === "PASS" || actionFindingId === item.id
+                    }
+                    className={`action-button${item.status === "PASS" ? " is-muted" : ""}`}
                     onClick={() => handleRemediate(item.id)}
                   >
-                    {actionFindingId === item.id ? 'Applying...' : item.status === 'PASS' ? 'Fixed' : 'Remediate'}
+                    {actionFindingId === item.id
+                      ? "Applying..."
+                      : item.status === "PASS"
+                        ? "Fixed"
+                        : "Remediate"}
                   </button>
                 </article>
               ))}
@@ -532,10 +661,13 @@ function FilterSelect({ label, value, options, onChange }) {
 }
 
 function createPieGradient(items) {
-  const total = items.reduce((accumulator, item) => accumulator + item.value, 0);
+  const total = items.reduce(
+    (accumulator, item) => accumulator + item.value,
+    0,
+  );
 
   if (!total) {
-    return 'conic-gradient(var(--slate) 0deg 360deg)';
+    return "conic-gradient(var(--slate) 0deg 360deg)";
   }
 
   let current = 0;
@@ -546,7 +678,7 @@ function createPieGradient(items) {
       current = next;
       return stop;
     })
-    .join(', ');
+    .join(", ");
 
   return `conic-gradient(${stops})`;
 }
@@ -554,13 +686,13 @@ function createPieGradient(items) {
 function formatLastUpdated(timestamp) {
   const date = new Date(timestamp);
 
-  return new Intl.DateTimeFormat('vi-VN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour12: false
+  return new Intl.DateTimeFormat("vi-VN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour12: false,
   }).format(date);
 }
 
@@ -582,10 +714,46 @@ function UserIcon() {
 function DashboardIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="4" y="4" width="6" height="6" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-      <rect x="14" y="4" width="6" height="10" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-      <rect x="4" y="14" width="6" height="6" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-      <rect x="14" y="18" width="6" height="2" rx="1" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <rect
+        x="4"
+        y="4"
+        width="6"
+        height="6"
+        rx="1.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <rect
+        x="14"
+        y="4"
+        width="6"
+        height="10"
+        rx="1.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <rect
+        x="4"
+        y="14"
+        width="6"
+        height="6"
+        rx="1.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <rect
+        x="14"
+        y="18"
+        width="6"
+        height="2"
+        rx="1"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
     </svg>
   );
 }
@@ -638,8 +806,21 @@ function CogIcon() {
 function SearchIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" strokeWidth="1.8" />
-      <path d="m16 16 4 4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <circle
+        cx="11"
+        cy="11"
+        r="6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="m16 16 4 4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }

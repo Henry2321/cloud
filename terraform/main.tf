@@ -1,6 +1,6 @@
 # 1. CẤU HÌNH NHÀ CUNG CẤP AWS
 provider "aws" {
-  region = "us-east-1"
+  region = "ap-southeast-2"
 }
 
 # =========================================================================
@@ -67,6 +67,30 @@ resource "aws_iam_role_policy_attachment" "lambda_iam_remediate" {
   policy_arn = aws_iam_policy.lambda_iam_remediate.arn
 }
 # Quyền của Phúc: Đọc CloudWatch Logs cho tính năng Spam IP
+resource "aws_lambda_function" "cspm_spam_ip_handler" {
+  function_name = "cspm-spam-ip-handler"
+  role          = aws_iam_role.lambda_exec_role.arn
+  filename      = "../cspm-backend/cspm_backend_payload.zip"
+  handler       = "api.get_spam_ips.lambda_handler"
+  runtime       = "python3.10"
+  timeout       = 30
+
+  environment {
+    variables = {
+      SPAM_HISTORY_TABLE = aws_dynamodb_table.spam_ip_history.name
+    }
+  }
+}
+resource "aws_dynamodb_table" "spam_ip_history" {
+  name         = "cspm-spam-ip-history"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "id"
+
+  attribute {
+    name = "id"
+    type = "S"
+  }
+}
 resource "aws_iam_role_policy_attachment" "lambda_cloudwatch_read" {
   role       = aws_iam_role.lambda_exec_role.name
   policy_arn = "arn:aws:iam::aws:policy/CloudWatchLogsReadOnlyAccess"
@@ -122,6 +146,18 @@ resource "aws_lambda_function" "cspm_api_handler" {
   handler          = "api.get_inventory.lambda_handler"
   runtime          = "python3.10"
   timeout          = 30
+# 4. TẠO ANH BẢO VỆ LAMBDA VÀ ĐƯA CODE (.ZIP) LÊN MÂY
+resource "aws_lambda_function" "cspm_scanner" {
+  function_name = "cspm-scanner-bot"
+  role          = aws_iam_role.lambda_exec_role.arn
+  
+  # Đường dẫn trỏ tới file zip bạn vừa tạo ở thư mục bên cạnh
+  filename      = "../cspm-backend/cspm_backend_payload.zip"
+  
+  # Chỉ định hàm Đội trưởng (orchestrator.py -> hàm lambda_handler)
+  handler       = "scanners.orchestrator.lambda_handler"
+  runtime       = "python3.10"
+  timeout       = 300 # Cho phép chạy tối đa 5 phút vì đi quét nhiều dịch vụ sẽ tốn thời gian
 
   environment {
     variables = {
@@ -196,6 +232,25 @@ resource "aws_apigatewayv2_stage" "default" {
   name        = "$default"
   auto_deploy = true
 }
+resource "aws_apigatewayv2_route" "get_spam_ips_route" {
+  api_id    = aws_apigatewayv2_api.cspm_api.id
+  route_key = "GET /api/cloudwatch/spam-ips"
+  target    = "integrations/${aws_apigatewayv2_integration.spam_ip_integration.id}"
+}
+resource "aws_apigatewayv2_integration" "spam_ip_integration" {
+  api_id                 = aws_apigatewayv2_api.cspm_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.cspm_spam_ip_handler.invoke_arn
+  payload_format_version = "2.0"
+}
+resource "aws_lambda_permission" "api_gw_spam_ip" {
+  statement_id  = "AllowExecutionFromAPIGatewaySpamIp"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.cspm_spam_ip_handler.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.cspm_api.execution_arn}/*/*"
+}
+
 
 # 1. Route: Get Findings
 resource "aws_apigatewayv2_route" "get_findings_route" {
