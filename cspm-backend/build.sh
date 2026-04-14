@@ -48,4 +48,8 @@ rm -rf $BUILD_DIR
 echo "=== HOÀN TẤT! ==="
 echo "Đã tạo thành công file: $OUTPUT_FILE"
 echo "Terraform bây giờ có thể lấy file này để mang lên AWS."
+Remove-Item cspm_backend_payload.zip -ErrorAction Ignore
 
+Compress-Archive `
+  -Path api,core,scanners,notifications,remediations `
+  -DestinationPath cspm_backend_payload.zip

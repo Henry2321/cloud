@@ -9,7 +9,7 @@ async function readJson(response) {
 }
 
 // KHAI BÁO ĐƯỜNG LINK API GATEWAY THẬT TỪ AWS
-const API_BASE_URL = "https://qf2xb7lha4.execute-api.us-east-1.amazonaws.com";
+const API_BASE_URL = "https://kjc3oeupte.execute-api.us-east-1.amazonaws.com";
 
 export async function getDashboardSummary(signal) {
   const response = await fetch(`${API_BASE_URL}/api/dashboard-summary`, {
@@ -41,15 +41,10 @@ export async function triggerScan(signal) {
 }
 
 export async function remediateFinding(findingId) {
-  const response = await fetch(
-    `${API_BASE_URL}/api/findings/${findingId}/remediate`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    },
-  );
-
+  const response = await fetch(`${API_BASE_URL}/api/findings/remediate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ finding_id: findingId }),
+  });
   return readJson(response);
 }

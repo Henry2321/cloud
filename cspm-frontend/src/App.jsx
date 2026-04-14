@@ -47,6 +47,9 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [actionFindingId, setActionFindingId] = useState("");
+  const [remediateMsg, setRemediateMsg] = useState({});
+  const [scanning, setScanning] = useState(false);
+  const [scanMsg, setScanMsg] = useState("");
   const [spamData, setSpamData] = useState(null);
   const deferredSearch = useDeferredValue(search);
   const [spamIps, setSpamIps] = useState([]);
@@ -163,6 +166,27 @@ function App() {
   const activityLabel = summary.resolved_findings
     ? `${summary.resolved_findings} resolved`
     : "Awaiting review";
+
+  async function handleScan() {
+    setScanning(true);
+    setScanMsg("");
+    try {
+      await triggerScan();
+      const [summaryPayload, findingsPayload] = await Promise.all([
+        getDashboardSummary(),
+        getFindings()
+      ]);
+      startTransition(() => {
+        setSummary(summaryPayload.summary);
+        setFindings(findingsPayload.findings);
+      });
+      setScanMsg("Scan completed!");
+    } catch (e) {
+      setScanMsg("Scan failed: " + (e.message || "Unknown error"));
+    } finally {
+      setScanning(false);
+    }
+  }
 
   async function handleRemediate(findingId) {
     setActionFindingId(findingId);

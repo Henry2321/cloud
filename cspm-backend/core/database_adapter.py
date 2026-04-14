@@ -16,9 +16,8 @@ def save_finding(service, resource_name, resource_id, rule_name, is_pass, severi
     """
     Hàm chuẩn hóa và lưu trữ kết quả quét của 1 tài nguyên vào Database.
     """
-    # Tạo ID ngẫu nhiên không đụng hàng cho mỗi dòng lỗi
-    finding_id = str(uuid.uuid4())
-    # Lấy giờ quốc tế (UTC) lúc phát hiện lỗi
+    # Dùng composite key cố định để scan lại sẽ overwrite thay vì tạo bản ghi mới
+    finding_id = f"{service}#{resource_id}#{rule_name}"
     timestamp = datetime.utcnow().isoformat()
     # Gán nhãn đạt/rớt
     status = 'PASS' if is_pass else 'FAIL'

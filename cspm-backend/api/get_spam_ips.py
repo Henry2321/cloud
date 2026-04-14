@@ -4,8 +4,8 @@ import os
 from datetime import datetime, timezone
 from decimal import Decimal
 
-cloudwatch = boto3.client('logs', region_name='ap-southeast-2')
-dynamodb = boto3.resource('dynamodb', region_name='ap-southeast-2')
+cloudwatch = boto3.client('logs')
+dynamodb = boto3.resource('dynamodb')
 
 HISTORY_TABLE = os.environ.get('SPAM_HISTORY_TABLE', 'cspm-spam-ip-history')
 

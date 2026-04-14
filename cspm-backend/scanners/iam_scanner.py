@@ -19,15 +19,21 @@ def scan_iam_users():
             severity = 'HIGH'
             
             try:
-                # Hỏi AWS xem user này có thiết bị MFA nào đang gắn vào không
                 mfa_response = iam_client.list_mfa_devices(UserName=user_name)
                 mfa_devices = mfa_response.get('MFADevices', [])
-                
+
                 if len(mfa_devices) > 0:
                     is_pass = True
                     details = f"Tài khoản {user_name} đã bật MFA an toàn."
                     severity = 'LOW'
-                    
+                else:
+                    # Kiểm tra đã enforce CSPM_ForceMFA policy chưa
+                    policies = iam_client.list_user_policies(UserName=user_name)
+                    if 'CSPM_ForceMFA' in policies.get('PolicyNames', []):
+                        is_pass = True
+                        details = f"Tài khoản {user_name} đã được enforce MFA policy (CSPM_ForceMFA)."
+                        severity = 'LOW'
+
             except Exception as e:
                 logger.error(f"Lỗi khi kiểm tra MFA của user {user_name}: {e}")
             
