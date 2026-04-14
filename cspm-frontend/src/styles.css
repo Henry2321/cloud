@@ -316,11 +316,13 @@ button {
   width: 104px;
   height: 104px;
   border-radius: 50%;
-  background: linear-gradient(180deg, rgba(10, 23, 39, 0.98), rgba(10, 22, 36, 0.86));
+  background: transparent;
   display: grid;
   place-items: center;
   text-align: center;
   padding: 12px;
+  position: relative;
+  z-index: 1;
 }
 
 .progress-ring__inner strong,
@@ -347,8 +349,10 @@ button {
 }
 
 .pie-ring {
-  background: var(--pie-gradient);
-  box-shadow: inset 0 0 20px rgba(255, 255, 255, 0.05);
+  background:
+    radial-gradient(circle at center, rgba(10, 23, 39, 0.98) 54%, transparent 55%),
+    var(--pie-gradient);
+  box-shadow: 0 0 24px rgba(0, 0, 0, 0.3);
 }
 
 .pie-card__body {
@@ -480,9 +484,14 @@ button {
 .filter-box select {
   border: 0;
   outline: 0;
-  background: transparent;
-  color: var(--text);
+  background: #111827;
+  color: #f4f7fb;
   min-width: 60px;
+}
+
+.filter-box select option {
+  background: #111827;
+  color: #f4f7fb;
 }
 
 .results-meta {
@@ -611,6 +620,133 @@ button {
   border-radius: 18px;
   border: 1px dashed rgba(135, 190, 228, 0.18);
   color: var(--muted);
+}
+
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.auth-card {
+  width: min(420px, 92vw);
+  padding: 36px 32px 32px;
+  animation: rise-in 480ms ease both;
+}
+
+.auth-header {
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+.auth-header h1 {
+  margin: 6px 0 0;
+  font-family: var(--font-display);
+  font-size: 1.7rem;
+  font-weight: 500;
+}
+
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 24px;
+  background: rgba(10, 22, 38, 0.6);
+  border-radius: 14px;
+  padding: 4px;
+}
+
+.auth-tab {
+  padding: 0.65rem;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+  transition: background 180ms, color 180ms;
+}
+
+.auth-tab.is-active {
+  background: linear-gradient(135deg, rgba(57, 208, 234, 0.18), rgba(104, 223, 227, 0.12));
+  color: var(--cyan);
+  border: 1px solid rgba(73, 216, 239, 0.2);
+}
+
+.auth-form {
+  display: grid;
+  gap: 16px;
+}
+
+.auth-field {
+  display: grid;
+  gap: 6px;
+}
+
+.auth-field label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  letter-spacing: 0.05em;
+}
+
+.auth-field input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border-radius: 14px;
+  border: 1px solid rgba(150, 188, 221, 0.14);
+  background: rgba(10, 22, 38, 0.7);
+  color: var(--text);
+  outline: none;
+  transition: border-color 180ms;
+}
+
+.auth-field input:focus {
+  border-color: rgba(73, 216, 239, 0.4);
+}
+
+.auth-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.auth-input-wrap input {
+  flex: 1;
+  padding-right: 2.8rem;
+}
+
+.eye-btn {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 4px;
+  display: grid;
+  place-items: center;
+  transition: color 180ms;
+}
+
+.eye-btn:hover {
+  color: var(--cyan);
+}
+
+.auth-error {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--coral);
+}
+
+.auth-success {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--mint);
+}
+
+.auth-submit {
+  width: 100%;
+  margin-top: 4px;
 }
 
 @keyframes rise-in {
