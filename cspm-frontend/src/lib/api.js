@@ -9,7 +9,7 @@ async function readJson(response) {
 }
 
 // KHAI BÁO ĐƯỜNG LINK API GATEWAY THẬT TỪ AWS
-const API_BASE_URL = "https://nrmbt9h5x7.execute-api.us-east-1.amazonaws.com";
+const API_BASE_URL = "https://z3e96tsm7j.execute-api.us-east-1.amazonaws.com";
 
 export async function getDashboardSummary(signal) {
   const response = await fetch(`${API_BASE_URL}/api/dashboard-summary`, {
