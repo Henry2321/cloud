@@ -63,7 +63,7 @@ function App() {
       setSpamLoading(true);
       try {
         const data = await getSpamIps(controller.signal);
-        setSpamIps(data.spamIps || []);
+        setSpamIps(data.current?.spamIps || []);
       } catch (e) {
         if (e.name !== "AbortError") setSpamIps([]);
       } finally {
@@ -208,6 +208,11 @@ function App() {
     });
   }, [findings, deferredSearch, severity, service]);
 
+  const pieGradient = createPieGradient(distribution);
+  const activityLabel = summary.resolved_findings
+    ? `${summary.resolved_findings} resolved`
+    : 'Awaiting review';
+
   // --- sau tất cả hooks mới được return sớm ---
   if (!user) return <Auth onLogin={setUser} />;
 
@@ -215,32 +220,6 @@ function App() {
     localStorage.removeItem("cspm_session");
     setUser("");
   }
-
-  async function handleScan() {
-    setScanning(true);
-    setScanMsg("");
-    try {
-      await triggerScan();
-      const [summaryPayload, findingsPayload] = await Promise.all([
-        getDashboardSummary(),
-        getFindings(),
-      ]);
-      startTransition(() => {
-        setSummary(summaryPayload.summary);
-        setFindings(findingsPayload.findings);
-      });
-      setScanMsg("Scan completed!");
-    } catch (e) {
-      setScanMsg("Scan failed: " + (e.message || "Unknown error"));
-    } finally {
-      setScanning(false);
-    }
-  }
-
-  const pieGradient = createPieGradient(distribution);
-  const activityLabel = summary.resolved_findings
-    ? `${summary.resolved_findings} resolved`
-    : "Awaiting review";
 
   async function handleScan() {
     setScanning(true);
@@ -490,23 +469,21 @@ function App() {
                 Spam IP Detection
               </h2>
             </div>
-            {!spamLoading && spamData && (
+            {!spamLoading && (
               <span
                 style={{
-                  background: spamData.current.spamIps.length
+                  background: spamIps.length
                     ? "rgba(220,53,69,0.12)"
                     : "rgba(25,200,100,0.12)",
-                  color: spamData.current.spamIps.length
-                    ? "#dc3545"
-                    : "#19c864",
+                  color: spamIps.length ? "#dc3545" : "#19c864",
                   padding: "4px 12px",
                   borderRadius: "999px",
                   fontSize: "0.75rem",
                   fontWeight: 600,
                 }}
               >
-                {spamData.current.spamIps.length
-                  ? `${spamData.current.spamIps.length} threat${spamData.current.spamIps.length > 1 ? "s" : ""} detected`
+                {spamIps.length
+                  ? `${spamIps.length} threat${spamIps.length > 1 ? "s" : ""} detected`
                   : "Clean"}
               </span>
             )}
@@ -519,16 +496,16 @@ function App() {
             </div>
           )}
 
-          {!spamLoading && spamData && (
+          {!spamLoading && (
             <>
-              {spamData.current.spamIps.length === 0 ? (
+              {spamIps.length === 0 ? (
                 <div className="empty-state">
                   <ShieldIcon />
                   <p>No spam IPs detected in this window.</p>
                 </div>
               ) : (
                 <div className="finding-list">
-                  {spamData.current.spamIps
+                  {[...spamIps]
                     .sort((a, b) => b.count - a.count)
                     .map((item, index) => (
                       <article
@@ -545,22 +522,7 @@ function App() {
                           >
                             {item.ip}
                           </h3>
-                          <p>
-                            {item.count} requests ·{" "}
-                            {new Date(
-                              spamData.current.window_from,
-                            ).toLocaleTimeString("vi-VN", {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                            {" → "}
-                            {new Date(
-                              spamData.current.window_to,
-                            ).toLocaleTimeString("vi-VN", {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </p>
+                          <p>{item.count} requests</p>
                         </div>
                         <span className="status-chip status-chip--fail">
                           {item.count > 10
@@ -581,63 +543,6 @@ function App() {
                       </article>
                     ))}
                 </div>
-              )}
-
-              {/* History */}
-              {spamData.history.length > 0 && (
-                <details style={{ marginTop: "1rem" }}>
-                  <summary
-                    style={{
-                      fontSize: "0.8rem",
-                      color: "var(--color-text-secondary, #aaa)",
-                      cursor: "pointer",
-                      padding: "6px 0",
-                      userSelect: "none",
-                    }}
-                  >
-                    History · {spamData.history.length} entries
-                  </summary>
-                  <div className="finding-list" style={{ marginTop: "0.5rem" }}>
-                    {spamData.history.map((entry) => (
-                      <article key={entry.id} className="finding-row">
-                        <div className="finding-copy">
-                          {entry.spam_ips.map((ip) => (
-                            <h3
-                              key={ip.ip}
-                              style={{
-                                fontFamily: "monospace",
-                                letterSpacing: "0.03em",
-                                marginBottom: "2px",
-                              }}
-                            >
-                              {ip.ip}
-                            </h3>
-                          ))}
-                          <p>
-                            {new Date(entry.window_from).toLocaleTimeString(
-                              "vi-VN",
-                              { hour: "2-digit", minute: "2-digit" },
-                            )}
-                            {" -> "}
-                            {new Date(entry.window_to).toLocaleTimeString(
-                              "vi-VN",
-                              { hour: "2-digit", minute: "2-digit" },
-                            )}
-                            {" ngày "}
-                            {new Date(entry.window_from).toLocaleDateString(
-                              "vi-VN",
-                            )}
-                          </p>
-                        </div>
-                        <span className="status-chip status-chip--fail">
-                          {entry.spam_ips
-                            .map((ip) => `${ip.count} req`)
-                            .join(" · ")}
-                        </span>
-                      </article>
-                    ))}
-                  </div>
-                </details>
               )}
             </>
           )}
