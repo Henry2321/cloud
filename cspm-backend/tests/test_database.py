@@ -1,1 +1,0 @@
-# Viết test để đảm bảo hàm quét S3 luôn chạy đúng

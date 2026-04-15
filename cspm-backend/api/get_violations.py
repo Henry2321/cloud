@@ -33,8 +33,8 @@ def lambda_handler(event, context):
             },
             'body': json.dumps({
                 "violation_count": len(sorted_violations),
-                "violations": sorted_violations
-            })
+                "findings": sorted_violations   # ĐÃ SỬA TÊN Ở ĐÂY
+            }, default=str)                     # ĐÃ THÊM ÉP KIỂU STRING Ở ĐÂY
         }
         
     except Exception as e:

@@ -1,6 +1,6 @@
 import zipfile, os, shutil, subprocess, sys
 
-base = r'C:\Users\NGUYEN MINH TRI\OneDrive\Desktop\Cloud-_Security-_Posture-_Management\cspm-backend'
+base = r'D:\Project Clone\Cloud-_Security-_Posture-_Management\cspm-backend'
 build = os.path.join(base, 'build_temp')
 zip_path = os.path.join(base, 'cspm_backend_payload.zip')
 
