@@ -1,0 +1,17 @@
+# Loại bỏ thư mục plugin của Terraform (thủ phạm gây lỗi)
+.terraform/
+
+# Loại bỏ các file trạng thái (chứa thông tin nhạy cảm)
+*.tfstate
+*.tfstate.*
+
+# Loại bỏ file biến chứa mật khẩu/token
+*.tfvars
+*.tfvars.json
+
+# Loại bỏ các file log
+*.log
+
+.env
+.env.*
+node_modules/
