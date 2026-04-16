@@ -52,7 +52,10 @@ function App() {
   const [remediateMsg, setRemediateMsg] = useState({});
   const [scanning, setScanning] = useState(false);
   const [scanMsg, setScanMsg] = useState("");
+  
+  // Tách riêng 2 state để không bị lỗi tẩu hỏa nhập ma nữa
   const [spamIps, setSpamIps] = useState([]);
+  const [spamHistory, setSpamHistory] = useState([]);
   const [spamLoading, setSpamLoading] = useState(true);
 
   const deferredSearch = useDeferredValue(search);
@@ -63,9 +66,14 @@ function App() {
       setSpamLoading(true);
       try {
         const data = await getSpamIps(controller.signal);
-        setSpamIps(data.current?.spamIps || []);
+        // Hỗ trợ cả 2 dạng API (có current/history hoặc trả thẳng)
+        setSpamIps(data.current?.spamIps || data.spamIps || []);
+        setSpamHistory(data.history || []);
       } catch (e) {
-        if (e.name !== "AbortError") setSpamIps([]);
+        if (e.name !== "AbortError") {
+          setSpamIps([]);
+          setSpamHistory([]);
+        }
       } finally {
         setSpamLoading(false);
       }
@@ -110,27 +118,9 @@ function App() {
   const distribution = useMemo(() => {
     if (!findings.length)
       return [
-        {
-          label: "Pass",
-          value: 0,
-          color: "var(--mint)",
-          muted: "var(--mint-soft)",
-          share: 0,
-        },
-        {
-          label: "Warning",
-          value: 0,
-          color: "var(--amber)",
-          muted: "var(--amber-soft)",
-          share: 0,
-        },
-        {
-          label: "Fail",
-          value: 0,
-          color: "var(--coral)",
-          muted: "var(--coral-soft)",
-          share: 0,
-        },
+        { label: "Pass", value: 0, color: "var(--mint)", muted: "var(--mint-soft)", share: 0 },
+        { label: "Warning", value: 0, color: "var(--amber)", muted: "var(--amber-soft)", share: 0 },
+        { label: "Fail", value: 0, color: "var(--coral)", muted: "var(--coral-soft)", share: 0 },
       ];
     const latestDate = findings.reduce((max, f) => {
       const d = new Date(f.timestamp);
@@ -144,15 +134,8 @@ function App() {
     const counts = src.reduce(
       (acc, f) => {
         const sev = (f.severity || "").toUpperCase();
-        if (
-          sev === "Fail" ||
-          sev === "FAIL" ||
-          sev === "HIGH" ||
-          sev === "CRITICAL"
-        )
-          acc.failed++;
-        else if (sev === "Warning" || sev === "WARNING" || sev === "MEDIUM")
-          acc.warning++;
+        if (sev === "Fail" || sev === "FAIL" || sev === "HIGH" || sev === "CRITICAL") acc.failed++;
+        else if (sev === "Warning" || sev === "WARNING" || sev === "MEDIUM") acc.warning++;
         else acc.passed++;
         return acc;
       },
@@ -160,27 +143,9 @@ function App() {
     );
     const total = counts.passed + counts.warning + counts.failed;
     return [
-      {
-        label: "Pass",
-        value: counts.passed,
-        color: "var(--mint)",
-        muted: "var(--mint-soft)",
-        share: total ? Math.round((counts.passed / total) * 100) : 0,
-      },
-      {
-        label: "Warning",
-        value: counts.warning,
-        color: "var(--amber)",
-        muted: "var(--amber-soft)",
-        share: total ? Math.round((counts.warning / total) * 100) : 0,
-      },
-      {
-        label: "Fail",
-        value: counts.failed,
-        color: "var(--coral)",
-        muted: "var(--coral-soft)",
-        share: total ? Math.round((counts.failed / total) * 100) : 0,
-      },
+      { label: "Pass", value: counts.passed, color: "var(--mint)", muted: "var(--mint-soft)", share: total ? Math.round((counts.passed / total) * 100) : 0 },
+      { label: "Warning", value: counts.warning, color: "var(--amber)", muted: "var(--amber-soft)", share: total ? Math.round((counts.warning / total) * 100) : 0 },
+      { label: "Fail", value: counts.failed, color: "var(--coral)", muted: "var(--coral-soft)", share: total ? Math.round((counts.failed / total) * 100) : 0 },
     ];
   }, [findings]);
 
@@ -193,16 +158,9 @@ function App() {
         item.rule_name.toLowerCase().includes(deferredSearch.toLowerCase());
       const matchesSeverity =
         severity === "All" ||
-        (severity === "Fail" &&
-          ["FAIL", "HIGH", "CRITICAL"].includes(
-            (item.severity || "").toUpperCase(),
-          )) ||
-        (severity === "Warning" &&
-          ["WARNING", "MEDIUM"].includes(
-            (item.severity || "").toUpperCase(),
-          )) ||
-        (severity === "Pass" &&
-          ["PASS", "LOW"].includes((item.severity || "").toUpperCase()));
+        (severity === "Fail" && ["FAIL", "HIGH", "CRITICAL"].includes((item.severity || "").toUpperCase())) ||
+        (severity === "Warning" && ["WARNING", "MEDIUM"].includes((item.severity || "").toUpperCase())) ||
+        (severity === "Pass" && ["PASS", "LOW"].includes((item.severity || "").toUpperCase()));
       const matchesService = service === "All" || item.service === service;
       return matchesSearch && matchesSeverity && matchesService;
     });
@@ -213,7 +171,6 @@ function App() {
     ? `${summary.resolved_findings} resolved`
     : 'Awaiting review';
 
-  // --- sau tất cả hooks mới được return sớm ---
   if (!user) return <Auth onLogin={setUser} />;
 
   function handleLogout() {
@@ -250,10 +207,7 @@ function App() {
       const result = await remediateFinding(findingId);
       setRemediateMsg((prev) => ({
         ...prev,
-        [findingId]: {
-          ok: true,
-          text: result.message || "Khắc phục thành công!",
-        },
+        [findingId]: { ok: true, text: result.message || "Khắc phục thành công!" },
       }));
       const [summaryPayload, findingsPayload] = await Promise.all([
         getDashboardSummary(),
@@ -544,9 +498,58 @@ function App() {
                     ))}
                 </div>
               )}
+
+              
+              {spamHistory.length > 0 && (
+                <details style={{ marginTop: '1rem' }}>
+                  <summary style={{
+                    fontSize: '0.8rem',
+                    color: 'var(--color-text-secondary, #aaa)',
+                    cursor: 'pointer',
+                    padding: '6px 0',
+                    userSelect: 'none'
+                  }}>
+                    History · {spamHistory.length} entries
+                  </summary>
+                  <div className="finding-list" style={{ marginTop: '0.5rem' }}>
+                    {spamHistory.map((entry, index) => (
+                      <article key={entry.id || index} className="finding-row">
+                        <div className="finding-copy">
+                          {entry.spam_ips ? (
+                            entry.spam_ips.map((ipObj) => (
+                              <h3 key={ipObj.ip} style={{ fontFamily: 'monospace', letterSpacing: '0.03em', marginBottom: '2px' }}>
+                                {ipObj.ip}
+                              </h3>
+                            ))
+                          ) : (
+                            <h3 style={{ fontFamily: 'monospace', letterSpacing: '0.03em', marginBottom: '2px' }}>
+                              {entry.ip}
+                            </h3>
+                          )}
+                          
+                          <p>
+                            {'from '}
+                            {entry.window_from ? new Date(entry.window_from).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : 'unknown'}
+                            {' to '}
+                            {entry.window_to ? new Date(entry.window_to).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : 'unknown'}
+                            {' day '}
+                            {entry.window_from ? new Date(entry.window_from).toLocaleDateString('vi-VN') : ''}
+                          </p>
+                        </div>
+                        <span className="status-chip status-chip--fail">
+                          {entry.spam_ips 
+                            ? entry.spam_ips.map(ipObj => `${ipObj.count} req`).join(' · ') 
+                            : `${entry.count} request`}
+                        </span>
+                      </article>
+                    ))}
+                  </div>
+                </details>
+              )}
             </>
           )}
         </section>
+
         <section className="panel findings-panel">
           <div className="search-shell">
             <SearchIcon />
@@ -724,46 +727,10 @@ function UserIcon() {
 function DashboardIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect
-        x="4"
-        y="4"
-        width="6"
-        height="6"
-        rx="1.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-      />
-      <rect
-        x="14"
-        y="4"
-        width="6"
-        height="10"
-        rx="1.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-      />
-      <rect
-        x="4"
-        y="14"
-        width="6"
-        height="6"
-        rx="1.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-      />
-      <rect
-        x="14"
-        y="18"
-        width="6"
-        height="2"
-        rx="1"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-      />
+      <rect x="4" y="4" width="6" height="6" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <rect x="14" y="4" width="6" height="10" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <rect x="4" y="14" width="6" height="6" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <rect x="14" y="18" width="6" height="2" rx="1" fill="none" stroke="currentColor" strokeWidth="1.6" />
     </svg>
   );
 }
@@ -816,21 +783,8 @@ function CogIcon() {
 function SearchIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <circle
-        cx="11"
-        cy="11"
-        r="6"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      <path
-        d="m16 16 4 4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
+      <circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path d="m16 16 4 4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
@@ -858,7 +812,6 @@ function extractAccountId(resourceId) {
 }
 
 function extractName(item) {
-  // Parse từ title: "SERVICE: tên | details"
   if (item.title) {
     const colonIdx = item.title.indexOf(":");
     if (colonIdx !== -1) {
